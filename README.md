@@ -68,8 +68,31 @@ Based on the work from pburgess:
 2. `cd firmware && pio run` to build, `pio run -t upload` to flash.
 3. The default build runs `TestPatternFace` (cycling color bars) so you can
    confirm panel wiring and orientation before building anything else.
-4. Once the projector panel's driver chip, resolution, and pinout are known,
-   replace the placeholder ST7789 wiring in `firmware/src/display/display.cpp`.
+4. The projector is assumed to match the reference `rp2040-doom-LCD` target:
+   an ILI9225 panel at 220x176 using the corresponding wiring and display
+   configuration. Update `firmware/src/display/display.cpp` to use that
+   configuration instead of the current placeholder ST7789 setup.
+
+## Current Status
+
+- The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
+  and face interface are in place.
+- `TestPatternFace` is implemented and is the active face. It cycles color
+  bars to verify that the display loop is running.
+- `TriangleFace` exists as a static placeholder with triangle eyes and a
+  mouth, but it is not active yet.
+- The next implementation step is configuring the display for the assumed
+  ILI9225 220x176 target, then selecting `TriangleFace` for hardware testing.
+- Animation, fire-like illumination, overlays, alternate faces, audio,
+  sensors, and Wi-Fi control remain future work.
+
+## Firmware Previews
+
+The current firmware renders these 220x176 previews:
+
+![Test pattern preview](docs/images/test-pattern.png)
+
+![Triangle face preview](docs/images/triangle-face.png)
 
 ### Windows on ARM64 note
 
