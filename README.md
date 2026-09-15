@@ -86,3 +86,8 @@ it's this gap — the fix is adding a `windows_arm64` entry (pointing at the
 same amd64 URL) to the `earle_*` dicts in that platform's installed
 `platform.py`, and adding `"windows_arm64"` to the `system` list in the
 downloaded packages' `package.json` files under `~/.platformio/packages/`.
+
+## Development Note
+
+This project was developed with substantial assistance from Anthropic's
+Claude. Third-party code and libraries remain under their respective licenses.
