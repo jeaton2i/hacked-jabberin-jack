@@ -1,0 +1,5 @@
+# Reference-only clones, not part of this project's own history.
+# See README.md "Project Layout" — firmware/ pulls Arduino_GFX from the
+# PlatformIO registry, not these local copies.
+/Arduino_GFX/
+/rp2040-doom-LCD/
