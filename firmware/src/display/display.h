@@ -10,8 +10,8 @@ public:
   void begin();
   Arduino_GFX *gfx() { return _gfx; }
 
-  static constexpr int16_t WIDTH = 240;
-  static constexpr int16_t HEIGHT = 240;
+  static constexpr int16_t WIDTH = 220;
+  static constexpr int16_t HEIGHT = 176;
 
 private:
   Arduino_GFX *_gfx = nullptr;

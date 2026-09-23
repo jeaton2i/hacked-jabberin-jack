@@ -57,6 +57,8 @@ Based on the work from pburgess:
 
 - `firmware/` — PlatformIO project (Arduino framework + Arduino_GFX) that
   runs on the RP2040 clone board.
+- `docs/rp2040-display-pinout.md` — working RP2040 display wiring map and
+  hardware assumptions.
 - `Arduino_GFX/` and `rp2040-doom-LCD/` — reference material only, not part
   of the build. `firmware/` pulls Arduino_GFX from the PlatformIO registry
   instead of these local copies.
@@ -66,25 +68,25 @@ Based on the work from pburgess:
 1. Install [PlatformIO](https://platformio.org/install/cli) (VS Code
    extension or CLI).
 2. `cd firmware && pio run` to build, `pio run -t upload` to flash.
-3. The default build runs `TestPatternFace` (cycling color bars) so you can
-   confirm panel wiring and orientation before building anything else.
-4. The projector is assumed to match the reference `rp2040-doom-LCD` target:
-   an ILI9225 panel at 220x176 using the corresponding wiring and display
-   configuration. Update `firmware/src/display/display.cpp` to use that
-   configuration instead of the current placeholder ST7789 setup.
+3. The default build runs `TriangleFace` with a warm candle-like flicker. To
+  check panel wiring and orientation, switch the active face in
+  `firmware/src/main.cpp` to `TestPatternFace`.
+4. The projector matches the reference `rp2040-doom-LCD` target: an ILI9225
+  panel at 220x176 using an 8-bit parallel interface. See
+  `docs/rp2040-display-pinout.md` for the GPIO mapping.
 
 ## Current Status
 
 - The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
   and face interface are in place.
 - `TestPatternFace` is implemented and is the active face. It cycles color
-  bars to verify that the display loop is running.
-- `TriangleFace` exists as a static placeholder with triangle eyes and a
-  mouth, but it is not active yet.
-- The next implementation step is configuring the display for the assumed
-  ILI9225 220x176 target, then selecting `TriangleFace` for hardware testing.
-- Animation, fire-like illumination, overlays, alternate faces, audio,
-  sensors, and Wi-Fi control remain future work.
+  bars to verify that the display loop is running when selected.
+- `TriangleFace` is active and renders the triangle eyes, nose, crescent
+  mouth, tangent-aligned teeth, and a smooth warm candle-like flicker.
+- The display is configured for the reference ILI9225 220x176 target and is
+  ready for hardware testing.
+- 3D-style shading, overlays, alternate faces, audio, sensors, and Wi-Fi
+  control remain future work.
 
 ## Firmware Previews
 

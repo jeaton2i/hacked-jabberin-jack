@@ -3,3 +3,9 @@
 # PlatformIO registry, not these local copies.
 /Arduino_GFX/
 /rp2040-doom-LCD/
+
+# Dump of the original controller's video assets (hundreds of MB of .amv
+# files) — reference material for reverse-engineering, not source.
+/original files/
+
+__pycache__/
