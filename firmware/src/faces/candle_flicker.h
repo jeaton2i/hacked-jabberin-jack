@@ -54,10 +54,15 @@ public:
     constexpr uint8_t kDimFloor = 60; // out of 255 - thin "wall" still
                                       // glows a little rather than going
                                       // fully black
-    uint8_t brightness = r8 > g8 ? r8 : g8;
-    if (b8 > brightness) {
-      brightness = b8;
-    }
+    // Perceptual luma (BT.601 weights, fixed-point), not max(r,g,b): a
+    // saturated color like red or blue has a high single channel but
+    // reads as much darker than white to the eye, and max() was scoring
+    // it almost as bright as white - "pumpkinscale" needs that same
+    // contrast a plain greyscale conversion would have, just mapped to
+    // pumpkin tones instead of grays.
+    uint8_t brightness = (uint8_t)(((uint16_t)r8 * 77 + (uint16_t)g8 * 150 +
+                                    (uint16_t)b8 * 29) >>
+                                   8);
     if (brightness < kDimFloor) {
       brightness = kDimFloor;
     }
