@@ -27,6 +27,10 @@ public:
   // does run. line2 may be null/empty for a single centered line.
   void setText(const char *line1, const char *line2 = nullptr);
 
+  // Swaps the font and re-renders immediately (used by main.cpp's "font"
+  // serial command). Safe to call before begin() too, same as setText().
+  void setFont(const GFXfont *font);
+
 private:
   void render();
 
@@ -34,6 +38,7 @@ private:
   char _line2[kMaxLineLength];
   bool _hasLine2 = false;
   int16_t _targetRadius;
+  const GFXfont *_font;
   Arduino_GFX *_gfx = nullptr;
   CandleFlicker _flicker;
   uint8_t *_renderedMask = nullptr; // 1 bit/pixel - see text_face.cpp

@@ -23,7 +23,7 @@ void maskSet(uint8_t *mask, int32_t index) {
 } // namespace
 
 TextFace::TextFace(const char *line1, const char *line2, int16_t targetRadius)
-    : _targetRadius(targetRadius) {
+    : _targetRadius(targetRadius), _font(&FreeSansBold10pt7b) {
   setText(line1, line2);
 }
 
@@ -44,6 +44,13 @@ void TextFace::setText(const char *line1, const char *line2) {
   }
 }
 
+void TextFace::setFont(const GFXfont *font) {
+  _font = font;
+  if (_gfx) {
+    render();
+  }
+}
+
 void TextFace::begin(Arduino_GFX *gfx) {
   _gfx = gfx;
   render();
@@ -54,16 +61,17 @@ void TextFace::render() {
   _height = _gfx->height();
   bool twoLines = _hasLine2;
 
-  // Rendered once per setText()/begin() call (not per-frame): render at
-  // native font size onto an off-screen canvas, measure the real ink
-  // bounding boxes, then compute the largest zoom that keeps every corner
-  // within _targetRadius of center. The zoomed+mirrored result is cached
-  // as a non-zero-means-ink mask (see draw()) so per-frame flicker only
-  // has to recolor + blit, not re-render text or recompute the fit.
+  // Rendered once per setText()/setFont()/begin() call (not per-frame):
+  // render at native font size onto an off-screen canvas, measure the
+  // real ink bounding boxes, then compute the largest zoom that keeps
+  // every corner within _targetRadius of center. The zoomed+mirrored
+  // result is cached as a non-zero-means-ink mask (see draw()) so
+  // per-frame flicker only has to recolor + blit, not re-render text or
+  // recompute the fit.
   Arduino_Canvas canvas(_width, _height, _gfx);
   canvas.begin(GFX_SKIP_OUTPUT_BEGIN);
   canvas.fillScreen(RGB565_BLACK);
-  canvas.setFont(&FreeSansBold10pt7b);
+  canvas.setFont(_font);
   canvas.setTextWrap(false);
   canvas.setTextColor(RGB565_WHITE); // placeholder; draw() recolors it
 

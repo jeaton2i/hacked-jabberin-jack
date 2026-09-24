@@ -91,6 +91,7 @@ send `help` any time to see it again.
 | `list`        | List every face with its on/off state, and the rotate interval |
 | `<n>`         | Toggle face `n` on/off (index from `list`)                 |
 | `text <l1>[\|l2]` | Set the `ConfigurableText` face's message (one line, or two split on `\|`) and jump to it |
+| `font [name]` | List available fonts (`sans`/`mono`/`serif`), or switch `ConfigurableText` to one |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `save`        | Persist the current face selection + rotate interval to flash |
 | `load`        | Reload the saved config from flash                          |
@@ -99,6 +100,13 @@ send `help` any time to see it again.
 
 Faces also auto-rotate on their own every `rotate` milliseconds (6s by
 default) among whichever faces are currently enabled.
+
+All three fonts get the same nearest-neighbor zoom in `TextFace` (render
+at native size, then rescale to fit the visible circular area) - that's
+what actually gives text its chunky, pixelated look, not the font itself.
+`font` just varies the letterforms while keeping that same style; neither
+the font nor the message chosen over serial is persisted to flash, so
+both reset to the compiled-in defaults (`sans`, "Set my text!") on reboot.
 
 Saved config is stored in the RP2040's emulated EEPROM — a 4KB flash sector
 the arduino-pico core reserves regardless of any filesystem — so it survives

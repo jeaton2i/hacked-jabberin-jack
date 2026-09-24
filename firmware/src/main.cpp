@@ -22,6 +22,9 @@
 #include "faces/test_pattern_face.h"
 #include "faces/text_face.h"
 #include "faces/triangle_face.h"
+#include "fonts/FreeMono8pt7b.h"
+#include "fonts/FreeSansBold10pt7b.h"
+#include "fonts/FreeSerifBoldItalic12pt7b.h"
 #include "prefs.h"
 
 namespace {
@@ -136,6 +139,24 @@ const bool kDefaultFaceEnabled[kFaceCount] = {
     true,  true};
 bool faceEnabled[kFaceCount];
 
+// Fonts ConfigurableTextFace can be switched between over serial (see the
+// "font" command). All still get the same nearest-neighbor zoom in
+// TextFace::render(), which is what actually gives the pixelated look -
+// so pick lets you vary the letterforms while keeping that same style.
+struct FontOption {
+  const char *name;
+  const GFXfont *font;
+};
+const FontOption kFontOptions[] = {
+    {"sans", &FreeSansBold10pt7b}, // default
+    {"mono", &FreeMono8pt7b},
+    {"serif", &FreeSerifBoldItalic12pt7b},
+};
+constexpr size_t kFontOptionCount =
+    sizeof(kFontOptions) / sizeof(kFontOptions[0]);
+size_t currentFontIndex = 0; // index into kFontOptions; matches the ctor
+                             // default TextFace uses (FreeSansBold10pt7b)
+
 size_t currentFace = 0;
 unsigned long autoRotateMs = kDefaultAutoRotateMs;
 
@@ -218,12 +239,22 @@ void printHelp() {
   Serial.println("  list        - list faces with on/off state + rotate interval");
   Serial.println("  <n>         - toggle face n on/off");
   Serial.println("  text <l1>[|l2] - set ConfigurableText's message and show it");
+  Serial.println("  font [name] - list/set ConfigurableText's font (sans/mono/serif)");
   Serial.println("  rotate <ms> - set auto-rotate interval (0 disables)");
   Serial.println("  save        - save current faces + rotate interval to flash");
   Serial.println("  load        - reload saved config from flash");
   Serial.println("  reset       - restore compiled-in defaults (not saved)");
   Serial.println("  debug       - toggle EyeLook motion logging (off by default)");
   Serial.println("  help        - show this message");
+}
+
+void printFontList(size_t currentFontIndex) {
+  Serial.println("Available fonts:");
+  for (size_t i = 0; i < kFontOptionCount; i++) {
+    Serial.print("  ");
+    Serial.print(kFontOptions[i].name);
+    Serial.println(i == currentFontIndex ? " (current)" : "");
+  }
 }
 
 // Skips leading spaces, returning a pointer into `line`.
@@ -238,8 +269,9 @@ const char *skipSpaces(const char *line) {
 // advances to the next enabled face (keeps the old "mash a key"
 // convenience); "list"/"help" print info; a bare number toggles that face's
 // on/off state; "rotate", "save", "load", and "reset" manage persisted
-// config; "text" sets ConfigurableTextFace's message; "debug" toggles
-// EyeLookMotion's diagnostic logging (see printHelp for details).
+// config; "text" sets ConfigurableTextFace's message; "font" lists/sets
+// its font; "debug" toggles EyeLookMotion's diagnostic logging (see
+// printHelp for details).
 void handleSerialCommand(const char *line) {
   if (line[0] == '\0') {
     advanceFace();
@@ -312,6 +344,27 @@ void handleSerialCommand(const char *line) {
       Serial.print(line2);
     }
     Serial.println();
+    return;
+  }
+  if (strncmp(line, "font", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
+    const char *arg = skipSpaces(line + 4);
+    if (arg[0] == '\0') {
+      printFontList(currentFontIndex);
+      return;
+    }
+    for (size_t i = 0; i < kFontOptionCount; i++) {
+      if (strcmp(arg, kFontOptions[i].name) == 0) {
+        currentFontIndex = i;
+        configurableTextFace.setFont(kFontOptions[i].font);
+        selectFace(kFaceCount - 1);
+        Serial.print("ConfigurableText font set to: ");
+        Serial.println(kFontOptions[i].name);
+        return;
+      }
+    }
+    Serial.print("Unknown font: ");
+    Serial.println(arg);
+    printFontList(currentFontIndex);
     return;
   }
   if (strncmp(line, "rotate", 6) == 0 && (line[6] == '\0' || line[6] == ' ')) {
