@@ -12,18 +12,21 @@ constexpr float kPi = 3.14159265359f;
 // Scene layout, all in panel pixels. Kept close to the panel's visible
 // circular area (centered ~(110, 88), radius ~78 - see the bullseye test
 // pattern) rather than filling the whole rectangle.
-constexpr float kCrownX = 108.0f, kCrownY = 74.0f; // top of the trunk
+constexpr float kCrownX = 108.0f, kCrownY = 76.0f; // top of the trunk
 constexpr float kBaseX = 96.0f, kBaseY = 142.0f;   // trunk's foot
 
-constexpr float kSunX = 138.0f, kSunY = 52.0f, kSunR = 15.0f;
-
-constexpr int kNumFronds = 7;
-constexpr float kFrondSpreadDeg = 130.0f; // full fan angle
-constexpr float kSwayAmpDeg = 9.0f;       // how far the wind rocks each frond
-constexpr float kDroopDeg = 34.0f;        // outer-half bend, tapered by how
-                                          // far a frond sits from center
-constexpr float kFrondLen = 50.0f;
-constexpr float kFrondBaseWidth = 9.0f;
+// Fronds: wide, blunt-tipped wedges - no sun (it just blurred into the
+// crown) and no mid-frond bend (a thin bent blade read as a bony finger,
+// not a leaf; a wide straight one doesn't need the bend to look natural).
+constexpr int kNumFronds = 5;
+constexpr float kFrondSpreadDeg = 155.0f; // full fan angle
+constexpr float kSwayAmpDeg = 8.0f;       // how far the wind rocks each frond
+constexpr float kFrondLen = 43.0f;
+constexpr float kFrondBaseWidth = 24.0f; // already includes a small gap so
+                                         // neighboring fronds don't fully
+                                         // merge into one solid mass
+constexpr float kFrondTipWidthFrac = 0.48f; // tip width as a fraction of
+                                            // the base - blunt, not a spike
 
 constexpr int kNumWaveLines = 3;
 constexpr float kWaveBaseY[kNumWaveLines] = {124.0f, 135.0f, 146.0f};
@@ -154,15 +157,12 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
   uint16_t color = _flicker.color();
 
   // Each frond's current (swaying) shape, computed once per frame in
-  // float (cheap - a handful of trig calls per frond, not per pixel) and
+  // float (cheap - a couple of trig calls per frond, not per pixel) and
   // rounded to int16_t here so every pixel test below is pure integer
-  // math: a tapered quad from the crown to a bend point, then a tapered
-  // triangle from the bend out to the tip - that bend is what gives the
-  // blade its droop instead of a rigid spike.
+  // math: a single wide wedge from the crown to a blunt tip.
   struct Frond {
     int16_t crownLeftX, crownLeftY, crownRightX, crownRightY;
-    int16_t bendLeftX, bendLeftY, bendRightX, bendRightY;
-    int16_t tipX, tipY;
+    int16_t tipLeftX, tipLeftY, tipRightX, tipRightY;
   };
   Frond fronds[kNumFronds];
   for (int i = 0; i < kNumFronds; i++) {
@@ -171,31 +171,19 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
     float sway = kSwayAmpDeg * sinf(_windPhase + i * 0.45f);
     float ang = (restDeg + sway) * kPi / 180.0f;
     float dirX = sinf(ang), dirY = -cosf(ang);
-    float bendLen = kFrondLen * 0.5f;
-    float bendX = kCrownX + dirX * bendLen;
-    float bendY = kCrownY + dirY * bendLen;
+    float tipX = kCrownX + dirX * kFrondLen;
+    float tipY = kCrownY + dirY * kFrondLen;
 
-    float droopSign = restDeg >= 0.0f ? 1.0f : -1.0f;
-    float droopFrac = fabsf(restDeg) / (kFrondSpreadDeg / 2.0f);
-    float droop = droopSign * kDroopDeg * powf(droopFrac, 0.6f) * kPi / 180.0f;
-    float ang2 = ang + droop;
-    float dir2X = sinf(ang2), dir2Y = -cosf(ang2);
-    float tipX = bendX + dir2X * (kFrondLen - bendLen);
-    float tipY = bendY + dir2Y * (kFrondLen - bendLen);
-
-    float bendWidth = kFrondBaseWidth * 0.55f;
     float perpX = -dirY, perpY = dirX;
-    fronds[i] = {
-        (int16_t)lroundf(kCrownX + perpX * kFrondBaseWidth / 2),
-        (int16_t)lroundf(kCrownY + perpY * kFrondBaseWidth / 2),
-        (int16_t)lroundf(kCrownX - perpX * kFrondBaseWidth / 2),
-        (int16_t)lroundf(kCrownY - perpY * kFrondBaseWidth / 2),
-        (int16_t)lroundf(bendX - perpX * bendWidth / 2),
-        (int16_t)lroundf(bendY - perpY * bendWidth / 2),
-        (int16_t)lroundf(bendX + perpX * bendWidth / 2),
-        (int16_t)lroundf(bendY + perpY * bendWidth / 2),
-        (int16_t)lroundf(tipX),
-        (int16_t)lroundf(tipY)};
+    float tipWidth = kFrondBaseWidth * kFrondTipWidthFrac;
+    fronds[i] = {(int16_t)lroundf(kCrownX + perpX * kFrondBaseWidth / 2),
+                (int16_t)lroundf(kCrownY + perpY * kFrondBaseWidth / 2),
+                (int16_t)lroundf(kCrownX - perpX * kFrondBaseWidth / 2),
+                (int16_t)lroundf(kCrownY - perpY * kFrondBaseWidth / 2),
+                (int16_t)lroundf(tipX - perpX * tipWidth / 2),
+                (int16_t)lroundf(tipY - perpY * tipWidth / 2),
+                (int16_t)lroundf(tipX + perpX * tipWidth / 2),
+                (int16_t)lroundf(tipY + perpY * tipWidth / 2)};
   }
 
   // Trunk: a slightly bowed, tapered quad from foot to crown - also
@@ -220,10 +208,6 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
   int16_t topRightX = (int16_t)lroundf(kCrownX + trunkNx * kTrunkTopWidth / 2);
   int16_t topRightY = (int16_t)lroundf(kCrownY + trunkNy * kTrunkTopWidth / 2);
 
-  int16_t sunCx = (int16_t)lroundf(kSunX), sunCy = (int16_t)lroundf(kSunY);
-  int16_t sunR = (int16_t)lroundf(kSunR);
-  int32_t sunRSq = (int32_t)sunR * sunR;
-
   static uint16_t stripBuffer[kPanelWidth * kStripHeight];
   for (int16_t rowOffset = 0; rowOffset < kPanelHeight;
        rowOffset += kStripHeight) {
@@ -232,13 +216,6 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
       stripHeight = kPanelHeight - rowOffset;
     }
     memset(stripBuffer, 0, (size_t)kPanelWidth * stripHeight * sizeof(uint16_t));
-
-    paintRegion(stripBuffer, rowOffset, stripHeight, sunCx - sunR,
-               sunCx + sunR, sunCy - sunR, sunCy + sunR, color,
-               [&](int16_t x, int16_t y) {
-                 int32_t dx = x - sunCx, dy = y - sunCy;
-                 return dx * dx + dy * dy <= sunRSq;
-               });
 
     paintQuad(stripBuffer, rowOffset, stripHeight, baseLeftX, baseLeftY,
              bowLeftX, bowLeftY, topLeftX, topLeftY, bowRightX, bowRightY,
@@ -250,11 +227,8 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
     for (int i = 0; i < kNumFronds; i++) {
       const Frond &f = fronds[i];
       paintQuad(stripBuffer, rowOffset, stripHeight, f.crownLeftX,
-               f.crownLeftY, f.crownRightX, f.crownRightY, f.bendRightX,
-               f.bendRightY, f.bendLeftX, f.bendLeftY, color);
-      paintTriangle(stripBuffer, rowOffset, stripHeight, f.bendLeftX,
-                   f.bendLeftY, f.bendRightX, f.bendRightY, f.tipX, f.tipY,
-                   color);
+               f.crownLeftY, f.crownRightX, f.crownRightY, f.tipRightX,
+               f.tipRightY, f.tipLeftX, f.tipLeftY, color);
     }
 
     for (int li = 0; li < kNumWaveLines; li++) {
