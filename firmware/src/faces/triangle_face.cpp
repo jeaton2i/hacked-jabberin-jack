@@ -77,34 +77,16 @@ void fillTangentToothInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
                        RGB565_BLACK);
 }
 
-uint16_t candleColor(float illumination) {
-  uint8_t red = 255.0f * illumination;
-  uint8_t green = 145.0f * illumination;
-  return RGB565(red, green, 0);
-}
 } // namespace
 
-void TriangleFace::begin(Arduino_GFX *gfx) {
-  _flickerPhase = 0.0f;
-  _illumination = 0.82f;
-  gfx->fillScreen(RGB565_BLACK);
-}
+void TriangleFace::begin(Arduino_GFX *gfx) { gfx->fillScreen(RGB565_BLACK); }
 
-void TriangleFace::update() {
-  _flickerPhase += 0.09f;
-  if (_flickerPhase >= 2.0f * PI_VALUE) {
-    _flickerPhase -= 2.0f * PI_VALUE;
-  }
-
-  _illumination = 0.82f + 0.10f * sinf(_flickerPhase) +
-                  0.05f * sinf(_flickerPhase * 2.37f) +
-                  0.03f * sinf(_flickerPhase * 5.11f);
-}
+void TriangleFace::update() { _flicker.update(); }
 
 void TriangleFace::draw(Arduino_GFX *gfx) {
   int16_t w = gfx->width();
   int16_t h = gfx->height();
-  uint16_t faceColor = candleColor(_illumination);
+  uint16_t faceColor = _flicker.color();
 
   // Placeholder triangle eyes and mouth, proportioned off screen size so it
   // scales once the real panel resolution is known.

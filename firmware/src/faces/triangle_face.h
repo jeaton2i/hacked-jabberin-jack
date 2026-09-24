@@ -1,5 +1,6 @@
 #pragma once
 
+#include "candle_flicker.h"
 #include "face.h"
 
 // Initial goal #2: basic triangle-face pumpkin, static for now. Fire-like
@@ -12,6 +13,5 @@ public:
   void draw(Arduino_GFX *gfx) override;
 
 private:
-  float _flickerPhase = 0.0f;
-  float _illumination = 0.82f;
+  CandleFlicker _flicker;
 };

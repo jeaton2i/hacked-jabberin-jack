@@ -59,6 +59,11 @@ Based on the work from pburgess:
   runs on the RP2040 clone board.
 - `docs/rp2040-display-pinout.md` — working RP2040 display wiring map and
   hardware assumptions.
+- `tools/convert_image_to_rgb565.py` — converts an image in `sample-images/`
+  into a PROGMEM RGB565 header under `firmware/src/assets/` for use by
+  `StaticImageFace`/`CandleLitImageFace`.
+- `tools/face_preview.py` — renders a face off-device (no hardware needed)
+  for a quick look before flashing.
 - `Arduino_GFX/` and `rp2040-doom-LCD/` — reference material only, not part
   of the build. `firmware/` pulls Arduino_GFX from the PlatformIO registry
   instead of these local copies.
@@ -68,24 +73,53 @@ Based on the work from pburgess:
 1. Install [PlatformIO](https://platformio.org/install/cli) (VS Code
    extension or CLI).
 2. `cd firmware && pio run` to build, `pio run -t upload` to flash.
-3. The default build runs `TriangleFace` with a warm candle-like flicker. To
-  check panel wiring and orientation, switch the active face in
-  `firmware/src/main.cpp` to `TestPatternFace`.
-4. The projector matches the reference `rp2040-doom-LCD` target: an ILI9225
-  panel at 220x176 using an 8-bit parallel interface. See
-  `docs/rp2040-display-pinout.md` for the GPIO mapping.
+3. The projector matches the reference `rp2040-doom-LCD` target: an ILI9225
+   panel at 220x176 using an 8-bit parallel interface. See
+   `docs/rp2040-display-pinout.md` for the GPIO mapping.
+4. Connect over serial at 115200 baud (`pio device monitor`) to switch faces
+   and configure the firmware — see "Runtime Controls" below.
+
+## Runtime Controls
+
+Faces can be advanced with a push button (GP13, wired active-low to GND) or
+over the serial console. On boot, the serial console prints the command list;
+send `help` any time to see it again.
+
+| Command       | Effect                                                    |
+|---------------|-------------------------------------------------------------|
+| *(enter)*     | Advance to the next enabled face                           |
+| `list`        | List every face with its on/off state, and the rotate interval |
+| `<n>`         | Toggle face `n` on/off (index from `list`)                 |
+| `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
+| `save`        | Persist the current face selection + rotate interval to flash |
+| `load`        | Reload the saved config from flash                          |
+| `reset`       | Restore the compiled-in defaults (does not touch flash)     |
+
+Faces also auto-rotate on their own every `rotate` milliseconds (6s by
+default) among whichever faces are currently enabled.
+
+Saved config is stored in the RP2040's emulated EEPROM — a 4KB flash sector
+the arduino-pico core reserves regardless of any filesystem — so it survives
+power cycles without needing a LittleFS partition. `save`/`load` only take
+effect explicitly; toggling faces or changing the rotate interval over serial
+does not touch flash until you `save`. The saved face bitmask is positional
+(bit *n* = face index *n* from `list`), so it should be re-saved after
+reordering or adding/removing faces in `main.cpp`.
 
 ## Current Status
 
 - The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
-  and face interface are in place.
-- `TestPatternFace` is implemented and is the active face. It cycles color
-  bars to verify that the display loop is running when selected.
-- `TriangleFace` is active and renders the triangle eyes, nose, crescent
-  mouth, tangent-aligned teeth, and a smooth warm candle-like flicker.
-- The display is configured for the reference ILI9225 220x176 target and is
-  ready for hardware testing.
-- 3D-style shading, overlays, alternate faces, audio, sensors, and Wi-Fi
+  and face interface are in place, targeting the ILI9225 220x176 panel.
+- Around 20 faces are registered and cycle via button, serial, or
+  auto-rotation: geometric faces (`TriangleFace` with a warm candle flicker,
+  `TestPatternFace` — currently noisy so disabled by default, `Checkerboard`,
+  `Bullseye`, `PacMan`), text faces (`TextFace`), and a set of static image
+  faces (Jack Skellington, skull, commodore logo, WPI goat, robot, eyeball)
+  each available plain or candle-lit via a shared flicker helper.
+- Runtime config (which faces are enabled, the rotate interval) can be
+  changed and persisted to flash over the serial console — see "Runtime
+  Controls" above.
+- 3D-style shading, overlays, moving mouth/eyes, audio, sensors, and Wi-Fi
   control remain future work.
 
 ## Firmware Previews
