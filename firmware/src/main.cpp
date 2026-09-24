@@ -11,8 +11,11 @@
 #include "assets/image_wpi_goat_head.h"
 #include "display/display.h"
 #include "faces/bullseye_face.h"
+#include "faces/candle_lit_eye_look_face.h"
 #include "faces/candle_lit_image_face.h"
 #include "faces/checkerboard_face.h"
+#include "faces/eye_look_face.h"
+#include "faces/eye_look_motion.h"
 #include "faces/face.h"
 #include "faces/pacman_face.h"
 #include "faces/static_image_face.h"
@@ -51,6 +54,7 @@ StaticImageFace eyeballFace(image_eyeball, image_eyeball_width,
 TextFace happyHalloweenFace("Happy", "Halloween");
 TextFace booFace("Boo!");
 PacManFace pacManFace;
+EyeLookFace eyeLookFace;
 
 CandleLitImageFace jackSkellingtonCandleFace(image_jack_skellington,
                                              image_jack_skellington_width,
@@ -68,6 +72,7 @@ CandleLitImageFace robotCandleFace(image_robot, image_robot_width,
                                    image_robot_height);
 CandleLitImageFace eyeballCandleFace(image_eyeball, image_eyeball_width,
                                      image_eyeball_height);
+CandleLitEyeLookFace eyeLookCandleFace;
 
 Face *faces[] = {&triangleFace,
                  &testPatternFace,
@@ -81,6 +86,7 @@ Face *faces[] = {&triangleFace,
                  &wpiGoatHeadFace,
                  &robotFace,
                  &eyeballFace,
+                 &eyeLookFace,
                  &jackSkellingtonCandleFace,
                  &skullCandleFace,
                  &commodoreCandleFace,
@@ -88,6 +94,7 @@ Face *faces[] = {&triangleFace,
                  &wpiGoatHeadCandleFace,
                  &robotCandleFace,
                  &eyeballCandleFace,
+                 &eyeLookCandleFace,
                  &happyHalloweenFace,
                  &booFace};
 const char *faceNames[] = {"TriangleFace",
@@ -102,6 +109,7 @@ const char *faceNames[] = {"TriangleFace",
                            "WpiGoatHeadOnly",
                            "Robot",
                            "Eyeball",
+                           "EyeballLookAround",
                            "JackSkellingtonCandleLit",
                            "SkullCandleLit",
                            "CommodoreCandleLit",
@@ -109,6 +117,7 @@ const char *faceNames[] = {"TriangleFace",
                            "WpiGoatHeadCandleLit",
                            "RobotCandleLit",
                            "EyeballCandleLit",
+                           "EyeballLookAroundCandleLit",
                            "HappyHalloweenText",
                            "BooText"};
 constexpr size_t kFaceCount = sizeof(faces) / sizeof(faces[0]);
@@ -120,7 +129,8 @@ static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
 // but stays in the rotation/menu so it's a one-command toggle to check.
 const bool kDefaultFaceEnabled[kFaceCount] = {
     true,  false, true, true, true, true, true, true,  true, true, true,
-    true,  true,  true, true, true, true, true, true,  true, true};
+    true,  true,  true, true, true, true, true, true,  true, true, true,
+    true};
 bool faceEnabled[kFaceCount];
 
 size_t currentFace = 0;
@@ -206,6 +216,7 @@ void printHelp() {
   Serial.println("  save        - save current faces + rotate interval to flash");
   Serial.println("  load        - reload saved config from flash");
   Serial.println("  reset       - restore compiled-in defaults (not saved)");
+  Serial.println("  debug       - toggle EyeLook motion logging (off by default)");
   Serial.println("  help        - show this message");
 }
 
@@ -221,7 +232,8 @@ const char *skipSpaces(const char *line) {
 // advances to the next enabled face (keeps the old "mash a key"
 // convenience); "list"/"help" print info; a bare number toggles that face's
 // on/off state; "rotate", "save", "load", and "reset" manage persisted
-// config (see printHelp for details).
+// config; "debug" toggles EyeLookMotion's diagnostic logging (see
+// printHelp for details).
 void handleSerialCommand(const char *line) {
   if (line[0] == '\0') {
     advanceFace();
@@ -255,6 +267,13 @@ void handleSerialCommand(const char *line) {
   if (strcmp(line, "reset") == 0) {
     resetToDefaults();
     Serial.println("Restored compiled-in defaults (not saved)");
+    return;
+  }
+  if (strcmp(line, "debug") == 0) {
+    bool enabled = !EyeLookMotion::debugLogging();
+    EyeLookMotion::setDebugLogging(enabled);
+    Serial.println(enabled ? "EyeLook motion logging: on"
+                           : "EyeLook motion logging: off");
     return;
   }
   if (strncmp(line, "rotate", 6) == 0 && (line[6] == '\0' || line[6] == ' ')) {

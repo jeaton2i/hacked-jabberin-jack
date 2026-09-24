@@ -94,6 +94,7 @@ send `help` any time to see it again.
 | `save`        | Persist the current face selection + rotate interval to flash |
 | `load`        | Reload the saved config from flash                          |
 | `reset`       | Restore the compiled-in defaults (does not touch flash)     |
+| `debug`       | Toggle diagnostic logging for the animated-eye faces' motion (off by default) |
 
 Faces also auto-rotate on their own every `rotate` milliseconds (6s by
 default) among whichever faces are currently enabled.
