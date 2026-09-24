@@ -93,13 +93,20 @@ send `help` any time to see it again.
 | `text <l1>[\|l2\|l3\|l4]` | Set the `ConfigurableText` face's message (up to 4 lines, split on `\|`) and jump to it |
 | `font [name]` | List available fonts, or switch `ConfigurableText` to one (see below) |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
-| `save`        | Persist the current face selection + rotate interval to flash |
+| `brightness [percent]` | Show, or set, the candle brightness (`100` = the flicker's original intensity; default is `115`) |
+| `save`        | Persist the current face selection + rotate interval + brightness to flash |
 | `load`        | Reload the saved config from flash                          |
 | `reset`       | Restore the compiled-in defaults (does not touch flash)     |
 | `debug`       | Toggle diagnostic logging for the animated-eye faces' motion (off by default) |
 
 Faces also auto-rotate on their own every `rotate` milliseconds (6s by
 default) among whichever faces are currently enabled.
+
+`brightness` scales every flickering face together (`CandleFlicker` is
+shared by `TriangleFace`, the flickering text faces, and all the
+candle-lit image faces) - above 100% brightens (clamped so colors never
+overflow/wrap), below 100% dims. It's saved to flash the same way the
+rotate interval is.
 
 `font` offers each letterform (`sans`/`mono`/`serif`) in two textures:
 the plain name renders with `TextFace`'s usual nearest-neighbor zoom

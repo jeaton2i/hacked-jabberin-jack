@@ -20,10 +20,24 @@ public:
   }
 
   uint16_t color() const {
-    uint8_t red = 255.0f * _illumination;
-    uint8_t green = 145.0f * _illumination;
+    float illum = _illumination * s_brightness;
+    if (illum > 1.0f) {
+      illum = 1.0f;
+    } else if (illum < 0.0f) {
+      illum = 0.0f;
+    }
+    uint8_t red = (uint8_t)(255.0f * illum);
+    uint8_t green = (uint8_t)(145.0f * illum);
     return RGB565(red, green, 0);
   }
+
+  // Runtime brightness scale shared by every CandleFlicker instance (they
+  // already all breathe in sync; this keeps them in sync too) - see
+  // main.cpp's "brightness" serial command. 1.0 is the flicker's own
+  // original intensity; higher brightens (clamped in color() so channels
+  // never overflow), lower dims.
+  static void setBrightness(float brightness) { s_brightness = brightness; }
+  static float brightness() { return s_brightness; }
 
   // Depth-carved look: instead of a flat silhouette, a source-image
   // pixel's own brightness controls how much candle light comes through,
@@ -77,4 +91,5 @@ public:
 private:
   float _phase = 0.0f;
   float _illumination = 0.82f;
+  static float s_brightness;
 };

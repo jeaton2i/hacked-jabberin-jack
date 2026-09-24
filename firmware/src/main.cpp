@@ -11,6 +11,7 @@
 #include "assets/image_wpi_goat_head.h"
 #include "display/display.h"
 #include "faces/bullseye_face.h"
+#include "faces/candle_flicker.h"
 #include "faces/candle_lit_eye_look_face.h"
 #include "faces/candle_lit_image_face.h"
 #include "faces/checkerboard_face.h"
@@ -33,6 +34,7 @@ namespace {
 constexpr int8_t PIN_NEXT_BUTTON = 13;
 constexpr unsigned long kButtonDebounceMs = 200;
 constexpr unsigned long kDefaultAutoRotateMs = 6000;
+constexpr unsigned long kDefaultBrightnessPercent = 115;
 } // namespace
 
 Display display;
@@ -200,6 +202,7 @@ void applyEnabledMask(uint32_t mask) {
 void resetToDefaults() {
   memcpy(faceEnabled, kDefaultFaceEnabled, sizeof(faceEnabled));
   autoRotateMs = kDefaultAutoRotateMs;
+  CandleFlicker::setBrightness(kDefaultBrightnessPercent / 100.0f);
 }
 
 void selectFace(size_t index) {
@@ -253,7 +256,8 @@ void printHelp() {
   Serial.println("  text <l1>[|l2|l3|l4] - set ConfigurableText (up to 4 lines) and show it");
   Serial.println("  font [name] - list/set ConfigurableText's font (see 'font' with no name)");
   Serial.println("  rotate <ms> - set auto-rotate interval (0 disables)");
-  Serial.println("  save        - save current faces + rotate interval to flash");
+  Serial.println("  brightness [percent] - show/set candle brightness (100=original)");
+  Serial.println("  save        - save current faces + rotate interval + brightness to flash");
   Serial.println("  load        - reload saved config from flash");
   Serial.println("  reset       - restore compiled-in defaults (not saved)");
   Serial.println("  debug       - toggle EyeLook motion logging (off by default)");
@@ -280,10 +284,10 @@ const char *skipSpaces(const char *line) {
 // Serial UI: an empty line (just press enter) or any unrecognized input
 // advances to the next enabled face (keeps the old "mash a key"
 // convenience); "list"/"help" print info; a bare number toggles that face's
-// on/off state; "rotate", "save", "load", and "reset" manage persisted
-// config; "text" sets ConfigurableTextFace's message; "font" lists/sets
-// its font; "debug" toggles EyeLookMotion's diagnostic logging (see
-// printHelp for details).
+// on/off state; "rotate", "brightness", "save", "load", and "reset" manage
+// persisted config; "text" sets ConfigurableTextFace's message; "font"
+// lists/sets its font; "debug" toggles EyeLookMotion's diagnostic logging
+// (see printHelp for details).
 void handleSerialCommand(const char *line) {
   if (line[0] == '\0') {
     advanceFace();
@@ -298,9 +302,10 @@ void handleSerialCommand(const char *line) {
     return;
   }
   if (strcmp(line, "save") == 0) {
-    Prefs prefs{currentEnabledMask(), autoRotateMs};
+    Prefs prefs{currentEnabledMask(), autoRotateMs,
+               (uint32_t)(CandleFlicker::brightness() * 100.0f)};
     savePrefs(prefs);
-    Serial.println("Saved current faces + rotate interval to flash");
+    Serial.println("Saved current faces + rotate interval + brightness to flash");
     return;
   }
   if (strcmp(line, "load") == 0) {
@@ -308,6 +313,7 @@ void handleSerialCommand(const char *line) {
     if (loadPrefs(prefs)) {
       applyEnabledMask(prefs.enabledMask);
       autoRotateMs = prefs.rotateMs;
+      CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
       Serial.println("Loaded saved config from flash");
     } else {
       Serial.println("No valid saved config in flash");
@@ -324,6 +330,27 @@ void handleSerialCommand(const char *line) {
     EyeLookMotion::setDebugLogging(enabled);
     Serial.println(enabled ? "EyeLook motion logging: on"
                            : "EyeLook motion logging: off");
+    return;
+  }
+  if (strncmp(line, "brightness", 10) == 0 &&
+      (line[10] == '\0' || line[10] == ' ')) {
+    const char *arg = skipSpaces(line + 10);
+    if (arg[0] == '\0') {
+      Serial.print("Brightness: ");
+      Serial.print((int)(CandleFlicker::brightness() * 100.0f + 0.5f));
+      Serial.println("%");
+      return;
+    }
+    char *end;
+    long percent = strtol(arg, &end, 10);
+    if (end != arg && *end == '\0' && percent >= 0) {
+      CandleFlicker::setBrightness(percent / 100.0f);
+      Serial.print("Brightness set to ");
+      Serial.print(percent);
+      Serial.println("%");
+    } else {
+      Serial.println("Usage: brightness <percent>");
+    }
     return;
   }
   if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
@@ -446,6 +473,7 @@ void setup() {
   if (loadPrefs(prefs)) {
     applyEnabledMask(prefs.enabledMask);
     autoRotateMs = prefs.rotateMs;
+    CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
     Serial.println("Loaded saved config from flash");
   } else {
     Serial.println("No saved config in flash; using compiled-in defaults");

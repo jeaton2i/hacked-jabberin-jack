@@ -2,13 +2,15 @@
 
 #include <stdint.h>
 
-// Persisted configuration: which faces are enabled and the auto-rotate
-// interval. Stored in the RP2040's emulated EEPROM (a 4KB flash sector
-// reserved by the arduino-pico core, independent of any filesystem), so it
-// survives power cycles without needing a LittleFS partition.
+// Persisted configuration: which faces are enabled, the auto-rotate
+// interval, and the candle brightness scale. Stored in the RP2040's
+// emulated EEPROM (a 4KB flash sector reserved by the arduino-pico core,
+// independent of any filesystem), so it survives power cycles without
+// needing a LittleFS partition.
 struct Prefs {
   uint32_t enabledMask;
   uint32_t rotateMs;
+  uint32_t brightnessPercent; // CandleFlicker::brightness() * 100
 };
 
 // Loads saved prefs from flash into `out`. Returns false (leaving `out`
