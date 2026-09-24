@@ -12,21 +12,36 @@ constexpr float kPi = 3.14159265359f;
 // Scene layout, all in panel pixels. Kept close to the panel's visible
 // circular area (centered ~(110, 88), radius ~78 - see the bullseye test
 // pattern) rather than filling the whole rectangle.
-constexpr float kCrownX = 108.0f, kCrownY = 76.0f; // top of the trunk
-constexpr float kBaseX = 96.0f, kBaseY = 142.0f;   // trunk's foot
+constexpr float kCrownX = 102.0f, kCrownY = 76.0f; // where the fronds meet
+constexpr float kBaseX = 86.0f, kBaseY = 148.0f;   // trunk's foot
 
-// Fronds: wide, blunt-tipped wedges - no sun (it just blurred into the
-// crown) and no mid-frond bend (a thin bent blade read as a bony finger,
-// not a leaf; a wide straight one doesn't need the bend to look natural).
-constexpr int kNumFronds = 5;
-constexpr float kFrondSpreadDeg = 155.0f; // full fan angle
-constexpr float kSwayAmpDeg = 8.0f;       // how far the wind rocks each frond
-constexpr float kFrondLen = 43.0f;
-constexpr float kFrondBaseWidth = 24.0f; // already includes a small gap so
-                                         // neighboring fronds don't fully
-                                         // merge into one solid mass
-constexpr float kFrondTipWidthFrac = 0.48f; // tip width as a fraction of
-                                            // the base - blunt, not a spike
+constexpr float kTrunkBaseWidth = 11.0f, kTrunkTopWidth = 3.0f;
+constexpr float kTrunkBow = 12.0f; // how far the trunk bows sideways
+constexpr int kTrunkSegments = 10;
+
+// Each frond is a quadratic-bezier "hook": it leaves the crown heading
+// baseAngDeg (0 = straight up, + = toward +x), then curves by curveDeg
+// more over its length, tapering from width0 down to width1. Modeled on
+// a reference stencil's asymmetric arrangement - a few fronds arcing up
+// and over to hook downward on the right, one drooping low on the left -
+// rather than a symmetric fan.
+struct FrondSpec {
+  float baseAngDeg;
+  float curveDeg;
+  float armLen;
+  float width0, width1;
+  float swayScale; // fraction of kSwayAmpDeg this frond actually gets
+};
+constexpr FrondSpec kFronds[] = {
+    {30.0f, 100.0f, 32.0f, 13.0f, 5.0f, 0.8f},
+    {62.0f, 75.0f, 27.0f, 12.0f, 4.0f, 0.9f},
+    {90.0f, 55.0f, 24.0f, 11.0f, 4.0f, 1.0f},
+    {-10.0f, -45.0f, 22.0f, 11.0f, 4.0f, 0.7f},
+    {-50.0f, -100.0f, 36.0f, 12.0f, 5.0f, 1.1f},
+};
+constexpr int kNumFronds = sizeof(kFronds) / sizeof(kFronds[0]);
+constexpr int kFrondSegments = 10;
+constexpr float kSwayAmpDeg = 8.0f; // how far the wind rocks each frond
 
 constexpr int kNumWaveLines = 3;
 constexpr float kWaveBaseY[kNumWaveLines] = {124.0f, 135.0f, 146.0f};
@@ -69,11 +84,11 @@ void paintRegion(uint16_t *stripBuffer, int16_t rowOffset,
 }
 
 // Integer coordinates and integer cross-products, not float: this is the
-// hot per-pixel path (called for every candidate pixel of every frond/
-// trunk shape, every frame), and the RP2040 has no hardware FPU - the
+// hot per-pixel path (called for every candidate pixel of every ribbon
+// segment, every frame), and the RP2040 has no hardware FPU - the
 // eye-look face's original ~4fps bug came from exactly this kind of
 // per-pixel float math. Vertices are rounded to int16_t once per shape
-// per frame (see draw()), not per pixel.
+// per frame (see the ribbon builders below), not per pixel.
 bool inTriangle(int16_t x, int16_t y, int16_t x0, int16_t y0, int16_t x1,
                 int16_t y1, int16_t x2, int16_t y2) {
   int32_t d1 = (int32_t)(x - x1) * (y0 - y1) - (int32_t)(x0 - x1) * (y - y1);
@@ -112,6 +127,47 @@ void paintQuad(uint16_t *stripBuffer, int16_t rowOffset, int16_t stripHeight,
                color);
   paintTriangle(stripBuffer, rowOffset, stripHeight, x0, y0, x2, y2, x3, y3,
                color);
+}
+
+// Turns a sampled centerline (n+1 points, in float) plus a width taper
+// from width0 (at the first point) to width1 (at the last) into the
+// ribbon's left/right edges, rounded to int16_t once - same reasoning as
+// inTriangle() above.
+void ribbonFromCenterline(const float *cx, const float *cy, int n,
+                          float width0, float width1, int16_t *leftX,
+                          int16_t *leftY, int16_t *rightX, int16_t *rightY) {
+  for (int i = 0; i <= n; i++) {
+    float dx, dy;
+    if (i < n) {
+      dx = cx[i + 1] - cx[i];
+      dy = cy[i + 1] - cy[i];
+    } else {
+      dx = cx[i] - cx[i - 1];
+      dy = cy[i] - cy[i - 1];
+    }
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 0.001f) {
+      len = 0.001f;
+    }
+    float px = -dy / len, py = dx / len;
+    float t = (float)i / n;
+    float w = width0 + (width1 - width0) * t;
+    leftX[i] = (int16_t)lroundf(cx[i] + px * w / 2);
+    leftY[i] = (int16_t)lroundf(cy[i] + py * w / 2);
+    rightX[i] = (int16_t)lroundf(cx[i] - px * w / 2);
+    rightY[i] = (int16_t)lroundf(cy[i] - py * w / 2);
+  }
+}
+
+void paintRibbon(uint16_t *stripBuffer, int16_t rowOffset,
+                 int16_t stripHeight, const int16_t *leftX,
+                 const int16_t *leftY, const int16_t *rightX,
+                 const int16_t *rightY, int n, uint16_t color) {
+  for (int i = 0; i < n; i++) {
+    paintQuad(stripBuffer, rowOffset, stripHeight, leftX[i], leftY[i],
+             leftX[i + 1], leftY[i + 1], rightX[i + 1], rightY[i + 1],
+             rightX[i], rightY[i], color);
+  }
 }
 
 // One traveling wave line: computed column by column since each column's
@@ -156,57 +212,50 @@ void TropicalFace::update() {
 void TropicalFace::draw(Arduino_GFX *gfx) {
   uint16_t color = _flicker.color();
 
-  // Each frond's current (swaying) shape, computed once per frame in
-  // float (cheap - a couple of trig calls per frond, not per pixel) and
-  // rounded to int16_t here so every pixel test below is pure integer
-  // math: a single wide wedge from the crown to a blunt tip.
-  struct Frond {
-    int16_t crownLeftX, crownLeftY, crownRightX, crownRightY;
-    int16_t tipLeftX, tipLeftY, tipRightX, tipRightY;
-  };
-  Frond fronds[kNumFronds];
-  for (int i = 0; i < kNumFronds; i++) {
-    float restDeg =
-        -kFrondSpreadDeg / 2.0f + i * (kFrondSpreadDeg / (kNumFronds - 1));
-    float sway = kSwayAmpDeg * sinf(_windPhase + i * 0.45f);
-    float ang = (restDeg + sway) * kPi / 180.0f;
-    float dirX = sinf(ang), dirY = -cosf(ang);
-    float tipX = kCrownX + dirX * kFrondLen;
-    float tipY = kCrownY + dirY * kFrondLen;
-
-    float perpX = -dirY, perpY = dirX;
-    float tipWidth = kFrondBaseWidth * kFrondTipWidthFrac;
-    fronds[i] = {(int16_t)lroundf(kCrownX + perpX * kFrondBaseWidth / 2),
-                (int16_t)lroundf(kCrownY + perpY * kFrondBaseWidth / 2),
-                (int16_t)lroundf(kCrownX - perpX * kFrondBaseWidth / 2),
-                (int16_t)lroundf(kCrownY - perpY * kFrondBaseWidth / 2),
-                (int16_t)lroundf(tipX - perpX * tipWidth / 2),
-                (int16_t)lroundf(tipY - perpY * tipWidth / 2),
-                (int16_t)lroundf(tipX + perpX * tipWidth / 2),
-                (int16_t)lroundf(tipY + perpY * tipWidth / 2)};
+  // Trunk centerline: bowed sideways via a half-sine offset rather than a
+  // bezier hook (fronds use that below) - simpler, and it's just one
+  // shape.
+  float trunkCx[kTrunkSegments + 1], trunkCy[kTrunkSegments + 1];
+  for (int i = 0; i <= kTrunkSegments; i++) {
+    float t = (float)i / kTrunkSegments;
+    trunkCx[i] = kBaseX + (kCrownX - kBaseX) * t - kTrunkBow * sinf(t * kPi);
+    trunkCy[i] = kBaseY + (kCrownY - kBaseY) * t;
   }
+  int16_t trunkLX[kTrunkSegments + 1], trunkLY[kTrunkSegments + 1];
+  int16_t trunkRX[kTrunkSegments + 1], trunkRY[kTrunkSegments + 1];
+  ribbonFromCenterline(trunkCx, trunkCy, kTrunkSegments, kTrunkBaseWidth,
+                      kTrunkTopWidth, trunkLX, trunkLY, trunkRX, trunkRY);
 
-  // Trunk: a slightly bowed, tapered quad from foot to crown - also
-  // rounded to int16_t once, same reason as the fronds above.
-  float trunkDx = kCrownX - kBaseX, trunkDy = kCrownY - kBaseY;
-  float trunkLen = sqrtf(trunkDx * trunkDx + trunkDy * trunkDy);
-  float trunkNx = -trunkDy / trunkLen, trunkNy = trunkDx / trunkLen;
-  constexpr float kTrunkBaseWidth = 8.0f, kTrunkTopWidth = 4.0f;
-  float bowX = kBaseX + trunkDx * 0.5f - 3.0f;
-  float bowY = kBaseY + trunkDy * 0.5f;
+  // Each frond's current (swaying) shape: a quadratic bezier from the
+  // crown, computed once per frame in float (cheap - a handful of trig
+  // calls per frond, not per pixel) and rounded to int16_t via
+  // ribbonFromCenterline so every pixel test below is pure integer math.
+  int16_t frondLX[kNumFronds][kFrondSegments + 1];
+  int16_t frondLY[kNumFronds][kFrondSegments + 1];
+  int16_t frondRX[kNumFronds][kFrondSegments + 1];
+  int16_t frondRY[kNumFronds][kFrondSegments + 1];
+  for (int f = 0; f < kNumFronds; f++) {
+    const FrondSpec &spec = kFronds[f];
+    float sway = kSwayAmpDeg * spec.swayScale * sinf(_windPhase);
+    float ang0 = (spec.baseAngDeg + sway) * kPi / 180.0f;
+    float dir0X = sinf(ang0), dir0Y = -cosf(ang0);
+    float p1X = kCrownX + dir0X * spec.armLen;
+    float p1Y = kCrownY + dir0Y * spec.armLen;
+    float ang1 = (spec.baseAngDeg + spec.curveDeg + sway) * kPi / 180.0f;
+    float dir1X = sinf(ang1), dir1Y = -cosf(ang1);
+    float p2X = p1X + dir1X * spec.armLen;
+    float p2Y = p1Y + dir1Y * spec.armLen;
 
-  int16_t baseLeftX = (int16_t)lroundf(kBaseX - trunkNx * kTrunkBaseWidth / 2);
-  int16_t baseLeftY = (int16_t)lroundf(kBaseY - trunkNy * kTrunkBaseWidth / 2);
-  int16_t baseRightX = (int16_t)lroundf(kBaseX + trunkNx * kTrunkBaseWidth / 2);
-  int16_t baseRightY = (int16_t)lroundf(kBaseY + trunkNy * kTrunkBaseWidth / 2);
-  int16_t bowLeftX = (int16_t)lroundf(bowX - trunkNx * kTrunkBaseWidth * 0.35f);
-  int16_t bowLeftY = (int16_t)lroundf(bowY - trunkNy * kTrunkBaseWidth * 0.35f);
-  int16_t bowRightX = (int16_t)lroundf(bowX + trunkNx * kTrunkBaseWidth * 0.35f);
-  int16_t bowRightY = (int16_t)lroundf(bowY + trunkNy * kTrunkBaseWidth * 0.35f);
-  int16_t topLeftX = (int16_t)lroundf(kCrownX - trunkNx * kTrunkTopWidth / 2);
-  int16_t topLeftY = (int16_t)lroundf(kCrownY - trunkNy * kTrunkTopWidth / 2);
-  int16_t topRightX = (int16_t)lroundf(kCrownX + trunkNx * kTrunkTopWidth / 2);
-  int16_t topRightY = (int16_t)lroundf(kCrownY + trunkNy * kTrunkTopWidth / 2);
+    float cx[kFrondSegments + 1], cy[kFrondSegments + 1];
+    for (int i = 0; i <= kFrondSegments; i++) {
+      float t = (float)i / kFrondSegments;
+      float u = 1.0f - t;
+      cx[i] = u * u * kCrownX + 2 * u * t * p1X + t * t * p2X;
+      cy[i] = u * u * kCrownY + 2 * u * t * p1Y + t * t * p2Y;
+    }
+    ribbonFromCenterline(cx, cy, kFrondSegments, spec.width0, spec.width1,
+                        frondLX[f], frondLY[f], frondRX[f], frondRY[f]);
+  }
 
   static uint16_t stripBuffer[kPanelWidth * kStripHeight];
   for (int16_t rowOffset = 0; rowOffset < kPanelHeight;
@@ -217,18 +266,11 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
     }
     memset(stripBuffer, 0, (size_t)kPanelWidth * stripHeight * sizeof(uint16_t));
 
-    paintQuad(stripBuffer, rowOffset, stripHeight, baseLeftX, baseLeftY,
-             bowLeftX, bowLeftY, topLeftX, topLeftY, bowRightX, bowRightY,
-             color);
-    paintQuad(stripBuffer, rowOffset, stripHeight, bowLeftX, bowLeftY,
-             topLeftX, topLeftY, topRightX, topRightY, bowRightX, bowRightY,
-             color);
-
-    for (int i = 0; i < kNumFronds; i++) {
-      const Frond &f = fronds[i];
-      paintQuad(stripBuffer, rowOffset, stripHeight, f.crownLeftX,
-               f.crownLeftY, f.crownRightX, f.crownRightY, f.tipRightX,
-               f.tipRightY, f.tipLeftX, f.tipLeftY, color);
+    paintRibbon(stripBuffer, rowOffset, stripHeight, trunkLX, trunkLY,
+               trunkRX, trunkRY, kTrunkSegments, color);
+    for (int f = 0; f < kNumFronds; f++) {
+      paintRibbon(stripBuffer, rowOffset, stripHeight, frondLX[f],
+                 frondLY[f], frondRX[f], frondRY[f], kFrondSegments, color);
     }
 
     for (int li = 0; li < kNumWaveLines; li++) {
