@@ -90,7 +90,7 @@ send `help` any time to see it again.
 | *(enter)*     | Advance to the next enabled face                           |
 | `list`        | List every face with its on/off state, and the rotate interval |
 | `<n>`         | Toggle face `n` on/off (index from `list`)                 |
-| `text <msg>`  | Set the `ConfigurableText` face's message and jump to it   |
+| `text <l1>[\|l2]` | Set the `ConfigurableText` face's message (one line, or two split on `\|`) and jump to it |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `save`        | Persist the current face selection + rotate interval to flash |
 | `load`        | Reload the saved config from flash                          |

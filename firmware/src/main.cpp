@@ -143,8 +143,9 @@ unsigned long lastButtonChangeMs = 0;
 unsigned long lastAutoRotateMs = 0;
 int lastButtonState = HIGH;
 
-// Long enough for "text " plus a full TextFace::kMaxLineLength message.
-char serialLine[64];
+// Long enough for "text " plus two full TextFace::kMaxLineLength lines and
+// the "|" that separates them.
+char serialLine[104];
 uint8_t serialLineLength = 0;
 
 uint32_t currentEnabledMask() {
@@ -216,7 +217,7 @@ void printHelp() {
   Serial.println("  <enter>     - advance to next enabled face");
   Serial.println("  list        - list faces with on/off state + rotate interval");
   Serial.println("  <n>         - toggle face n on/off");
-  Serial.println("  text <msg>  - set ConfigurableText's message and show it");
+  Serial.println("  text <l1>[|l2] - set ConfigurableText's message and show it");
   Serial.println("  rotate <ms> - set auto-rotate interval (0 disables)");
   Serial.println("  save        - save current faces + rotate interval to flash");
   Serial.println("  load        - reload saved config from flash");
@@ -284,16 +285,33 @@ void handleSerialCommand(const char *line) {
   if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
     const char *arg = skipSpaces(line + 4);
     if (arg[0] == '\0') {
-      Serial.println("Usage: text <message>");
+      Serial.println("Usage: text <line1>[|line2]");
       return;
     }
-    configurableTextFace.setText(arg);
+    // Copied out (rather than split in place) since `line`/`arg` alias
+    // serialLine, and setText()'s two arguments both need to stay valid
+    // for the duration of the call.
+    char buf[sizeof(serialLine)];
+    strncpy(buf, arg, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    char *pipe = strchr(buf, '|');
+    const char *line2 = nullptr;
+    if (pipe) {
+      *pipe = '\0';
+      line2 = pipe + 1;
+    }
+    configurableTextFace.setText(buf, line2);
     // Jump straight to it so the new text is immediately visible, rather
     // than leaving it to show up whenever auto-rotate/advance next
     // happens to reach it.
     selectFace(kFaceCount - 1);
     Serial.print("ConfigurableText set to: ");
-    Serial.println(arg);
+    Serial.print(buf);
+    if (line2) {
+      Serial.print(" / ");
+      Serial.print(line2);
+    }
+    Serial.println();
     return;
   }
   if (strncmp(line, "rotate", 6) == 0 && (line[6] == '\0' || line[6] == ' ')) {
