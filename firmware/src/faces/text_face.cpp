@@ -23,22 +23,44 @@ void maskSet(uint8_t *mask, int32_t index) {
 } // namespace
 
 TextFace::TextFace(const char *line1, const char *line2, int16_t targetRadius)
-    : _line1(line1), _line2(line2), _targetRadius(targetRadius) {}
+    : _targetRadius(targetRadius) {
+  setText(line1, line2);
+}
 
 TextFace::~TextFace() { delete[] _renderedMask; }
 
-void TextFace::begin(Arduino_GFX *gfx) {
-  _width = gfx->width();
-  _height = gfx->height();
-  bool twoLines = _line2 != nullptr;
+void TextFace::setText(const char *line1, const char *line2) {
+  strncpy(_line1, line1 ? line1 : "", kMaxLineLength - 1);
+  _line1[kMaxLineLength - 1] = '\0';
+  if (line2 && line2[0] != '\0') {
+    strncpy(_line2, line2, kMaxLineLength - 1);
+    _line2[kMaxLineLength - 1] = '\0';
+    _hasLine2 = true;
+  } else {
+    _hasLine2 = false;
+  }
+  if (_gfx) {
+    render();
+  }
+}
 
-  // Rendered once (not per-frame): render at native font size onto an
-  // off-screen canvas, measure the real ink bounding boxes, then compute
-  // the largest zoom that keeps every corner within _targetRadius of
-  // center. The zoomed+mirrored result is cached as a non-zero-means-ink
-  // mask (see draw()) so per-frame flicker only has to recolor + blit, not
-  // re-render text or recompute the fit.
-  Arduino_Canvas canvas(_width, _height, gfx);
+void TextFace::begin(Arduino_GFX *gfx) {
+  _gfx = gfx;
+  render();
+}
+
+void TextFace::render() {
+  _width = _gfx->width();
+  _height = _gfx->height();
+  bool twoLines = _hasLine2;
+
+  // Rendered once per setText()/begin() call (not per-frame): render at
+  // native font size onto an off-screen canvas, measure the real ink
+  // bounding boxes, then compute the largest zoom that keeps every corner
+  // within _targetRadius of center. The zoomed+mirrored result is cached
+  // as a non-zero-means-ink mask (see draw()) so per-frame flicker only
+  // has to recolor + blit, not re-render text or recompute the fit.
+  Arduino_Canvas canvas(_width, _height, _gfx);
   canvas.begin(GFX_SKIP_OUTPUT_BEGIN);
   canvas.fillScreen(RGB565_BLACK);
   canvas.setFont(&FreeSansBold10pt7b);

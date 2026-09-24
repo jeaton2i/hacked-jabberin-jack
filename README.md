@@ -90,6 +90,7 @@ send `help` any time to see it again.
 | *(enter)*     | Advance to the next enabled face                           |
 | `list`        | List every face with its on/off state, and the rotate interval |
 | `<n>`         | Toggle face `n` on/off (index from `list`)                 |
+| `text <msg>`  | Set the `ConfigurableText` face's message and jump to it   |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `save`        | Persist the current face selection + rotate interval to flash |
 | `load`        | Reload the saved config from flash                          |
@@ -111,12 +112,15 @@ reordering or adding/removing faces in `main.cpp`.
 
 - The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
   and face interface are in place, targeting the ILI9225 220x176 panel.
-- Around 20 faces are registered and cycle via button, serial, or
+- Around 24 faces are registered and cycle via button, serial, or
   auto-rotation: geometric faces (`TriangleFace` with a warm candle flicker,
   `TestPatternFace` — currently noisy so disabled by default, `Checkerboard`,
-  `Bullseye`, `PacMan`), text faces (`TextFace`), and a set of static image
-  faces (Jack Skellington, skull, commodore logo, WPI goat, robot, eyeball)
-  each available plain or candle-lit via a shared flicker helper.
+  `Bullseye`, `PacMan`), text faces (`TextFace`, including a
+  `ConfigurableText` instance whose message is set live over serial - see
+  "Runtime Controls"), an animated eyeball whose iris darts around inside
+  the sclera (`EyeballLookAround`), and a set of static image faces (Jack
+  Skellington, skull, commodore logo, WPI goat, robot, eyeball) - all
+  available plain or candle-lit via a shared flicker helper.
 - Runtime config (which faces are enabled, the rotate interval) can be
   changed and persisted to flash over the serial console — see "Runtime
   Controls" above.

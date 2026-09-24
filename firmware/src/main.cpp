@@ -53,6 +53,7 @@ StaticImageFace eyeballFace(image_eyeball, image_eyeball_width,
                             image_eyeball_height);
 TextFace happyHalloweenFace("Happy", "Halloween");
 TextFace booFace("Boo!");
+TextFace configurableTextFace("Set my text!");
 PacManFace pacManFace;
 EyeLookFace eyeLookFace;
 
@@ -96,7 +97,8 @@ Face *faces[] = {&triangleFace,
                  &eyeballCandleFace,
                  &eyeLookCandleFace,
                  &happyHalloweenFace,
-                 &booFace};
+                 &booFace,
+                 &configurableTextFace};
 const char *faceNames[] = {"TriangleFace",
                            "TestPatternFace",
                            "Checkerboard",
@@ -119,7 +121,8 @@ const char *faceNames[] = {"TriangleFace",
                            "EyeballCandleLit",
                            "EyeballLookAroundCandleLit",
                            "HappyHalloweenText",
-                           "BooText"};
+                           "BooText",
+                           "ConfigurableText"};
 constexpr size_t kFaceCount = sizeof(faces) / sizeof(faces[0]);
 // enabledMask packs one bit per face; a wider mask type or a bitset would be
 // needed past 32 faces.
@@ -130,7 +133,7 @@ static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
 const bool kDefaultFaceEnabled[kFaceCount] = {
     true,  false, true, true, true, true, true, true,  true, true, true,
     true,  true,  true, true, true, true, true, true,  true, true, true,
-    true};
+    true,  true};
 bool faceEnabled[kFaceCount];
 
 size_t currentFace = 0;
@@ -140,7 +143,8 @@ unsigned long lastButtonChangeMs = 0;
 unsigned long lastAutoRotateMs = 0;
 int lastButtonState = HIGH;
 
-char serialLine[32];
+// Long enough for "text " plus a full TextFace::kMaxLineLength message.
+char serialLine[64];
 uint8_t serialLineLength = 0;
 
 uint32_t currentEnabledMask() {
@@ -212,6 +216,7 @@ void printHelp() {
   Serial.println("  <enter>     - advance to next enabled face");
   Serial.println("  list        - list faces with on/off state + rotate interval");
   Serial.println("  <n>         - toggle face n on/off");
+  Serial.println("  text <msg>  - set ConfigurableText's message and show it");
   Serial.println("  rotate <ms> - set auto-rotate interval (0 disables)");
   Serial.println("  save        - save current faces + rotate interval to flash");
   Serial.println("  load        - reload saved config from flash");
@@ -232,8 +237,8 @@ const char *skipSpaces(const char *line) {
 // advances to the next enabled face (keeps the old "mash a key"
 // convenience); "list"/"help" print info; a bare number toggles that face's
 // on/off state; "rotate", "save", "load", and "reset" manage persisted
-// config; "debug" toggles EyeLookMotion's diagnostic logging (see
-// printHelp for details).
+// config; "text" sets ConfigurableTextFace's message; "debug" toggles
+// EyeLookMotion's diagnostic logging (see printHelp for details).
 void handleSerialCommand(const char *line) {
   if (line[0] == '\0') {
     advanceFace();
@@ -274,6 +279,21 @@ void handleSerialCommand(const char *line) {
     EyeLookMotion::setDebugLogging(enabled);
     Serial.println(enabled ? "EyeLook motion logging: on"
                            : "EyeLook motion logging: off");
+    return;
+  }
+  if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
+    const char *arg = skipSpaces(line + 4);
+    if (arg[0] == '\0') {
+      Serial.println("Usage: text <message>");
+      return;
+    }
+    configurableTextFace.setText(arg);
+    // Jump straight to it so the new text is immediately visible, rather
+    // than leaving it to show up whenever auto-rotate/advance next
+    // happens to reach it.
+    selectFace(kFaceCount - 1);
+    Serial.print("ConfigurableText set to: ");
+    Serial.println(arg);
     return;
   }
   if (strncmp(line, "rotate", 6) == 0 && (line[6] == '\0' || line[6] == ' ')) {

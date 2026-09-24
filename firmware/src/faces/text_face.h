@@ -12,6 +12,8 @@
 // elsewhere.
 class TextFace : public Face {
 public:
+  static constexpr size_t kMaxLineLength = 48;
+
   explicit TextFace(const char *line1, const char *line2 = nullptr,
                     int16_t targetRadius = 75);
   ~TextFace() override;
@@ -19,10 +21,20 @@ public:
   void update() override;
   void draw(Arduino_GFX *gfx) override;
 
+  // Replaces the displayed text and re-renders immediately (used by
+  // main.cpp's "text" serial command for ConfigurableTextFace). Safe to
+  // call before begin() too - the new text just takes effect once begin()
+  // does run. line2 may be null/empty for a single centered line.
+  void setText(const char *line1, const char *line2 = nullptr);
+
 private:
-  const char *_line1;
-  const char *_line2;
+  void render();
+
+  char _line1[kMaxLineLength];
+  char _line2[kMaxLineLength];
+  bool _hasLine2 = false;
   int16_t _targetRadius;
+  Arduino_GFX *_gfx = nullptr;
   CandleFlicker _flicker;
   uint8_t *_renderedMask = nullptr; // 1 bit/pixel - see text_face.cpp
   int16_t _width = 0;
