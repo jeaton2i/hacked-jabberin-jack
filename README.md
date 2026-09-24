@@ -133,10 +133,11 @@ reordering or adding/removing faces in `main.cpp`.
 
 - The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
   and face interface are in place, targeting the ILI9225 220x176 panel.
-- Around 24 faces are registered and cycle via button, serial, or
+- Around 25 faces are registered and cycle via button, serial, or
   auto-rotation: geometric faces (`TriangleFace` with a warm candle flicker,
   `TestPatternFace` — currently noisy so disabled by default, `Checkerboard`,
-  `Bullseye`, `PacMan`), text faces (`TextFace`, including a
+  `Bullseye`, `PacMan`, `Tropical` — a palm tree fanning/swaying in the wind
+  over traveling wave lines), text faces (`TextFace`, including a
   `ConfigurableText` instance whose message is set live over serial - see
   "Runtime Controls"), an animated eyeball whose iris darts around inside
   the sclera (`EyeballLookAround`), and a set of static image faces (Jack

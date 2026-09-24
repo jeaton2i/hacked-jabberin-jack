@@ -23,6 +23,7 @@
 #include "faces/test_pattern_face.h"
 #include "faces/text_face.h"
 #include "faces/triangle_face.h"
+#include "faces/tropical_face.h"
 #include "fonts/FreeMono8pt7b.h"
 #include "fonts/FreeSansBold10pt7b.h"
 #include "fonts/FreeSerifBoldItalic12pt7b.h"
@@ -60,6 +61,7 @@ TextFace happyHalloweenFace("Happy", "Halloween");
 TextFace booFace("Boo!");
 TextFace configurableTextFace("Set my text!");
 PacManFace pacManFace;
+TropicalFace tropicalFace;
 EyeLookFace eyeLookFace;
 
 CandleLitImageFace jackSkellingtonCandleFace(image_jack_skellington,
@@ -92,6 +94,7 @@ Face *faces[] = {&triangleFace,
                  &checkerboardFace,
                  &bullseyeFace,
                  &pacManFace,
+                 &tropicalFace,
                  &jackSkellingtonFace,
                  &skullFace,
                  &commodoreFace,
@@ -116,6 +119,7 @@ const char *faceNames[] = {"TriangleFace",
                            "Checkerboard",
                            "Bullseye",
                            "PacMan",
+                           "Tropical",
                            "JackSkellington",
                            "Skull",
                            "Commodore",
@@ -145,7 +149,7 @@ static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
 const bool kDefaultFaceEnabled[kFaceCount] = {
     true,  false, true, true, true, true, true, true,  true, true, true,
     true,  true,  true, true, true, true, true, true,  true, true, true,
-    true,  true};
+    true,  true,  true};
 bool faceEnabled[kFaceCount];
 
 // Fonts ConfigurableTextFace can be switched between over serial (see the
