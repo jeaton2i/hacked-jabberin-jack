@@ -90,8 +90,8 @@ send `help` any time to see it again.
 | *(enter)*     | Advance to the next enabled face                           |
 | `list`        | List every face with its on/off state, and the rotate interval |
 | `<n>`         | Toggle face `n` on/off (index from `list`)                 |
-| `text <l1>[\|l2]` | Set the `ConfigurableText` face's message (one line, or two split on `\|`) and jump to it |
-| `font [name]` | List available fonts (`sans`/`mono`/`serif`), or switch `ConfigurableText` to one |
+| `text <l1>[\|l2\|l3\|l4]` | Set the `ConfigurableText` face's message (up to 4 lines, split on `\|`) and jump to it |
+| `font [name]` | List available fonts, or switch `ConfigurableText` to one (see below) |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `save`        | Persist the current face selection + rotate interval to flash |
 | `load`        | Reload the saved config from flash                          |
@@ -101,12 +101,18 @@ send `help` any time to see it again.
 Faces also auto-rotate on their own every `rotate` milliseconds (6s by
 default) among whichever faces are currently enabled.
 
-All three fonts get the same nearest-neighbor zoom in `TextFace` (render
-at native size, then rescale to fit the visible circular area) - that's
-what actually gives text its chunky, pixelated look, not the font itself.
-`font` just varies the letterforms while keeping that same style; neither
-the font nor the message chosen over serial is persisted to flash, so
-both reset to the compiled-in defaults (`sans`, "Set my text!") on reboot.
+`font` offers each letterform (`sans`/`mono`/`serif`) in two textures:
+the plain name renders with `TextFace`'s usual nearest-neighbor zoom
+(render at native size, then rescale to fit the visible circular area) -
+that's what actually gives text its chunky, pixelated look, not the font
+itself. The `-smooth` variant (e.g. `mono-smooth`) bilinearly resamples
+that same rendering instead, for anti-aliased edges - same letterforms,
+different texture. Smooth rendering is a one-time ~1s recompute when you
+switch to it (no ongoing cost - draw() itself is equally cheap either
+way), so expect a beat of delay before `font <name>-smooth` takes visible
+effect. Neither the font nor the message chosen over serial is persisted
+to flash, so both reset to the compiled-in defaults (`sans`, "Set my
+text!") on reboot.
 
 Saved config is stored in the RP2040's emulated EEPROM — a 4KB flash sector
 the arduino-pico core reserves regardless of any filesystem — so it survives

@@ -140,17 +140,22 @@ const bool kDefaultFaceEnabled[kFaceCount] = {
 bool faceEnabled[kFaceCount];
 
 // Fonts ConfigurableTextFace can be switched between over serial (see the
-// "font" command). All still get the same nearest-neighbor zoom in
-// TextFace::render(), which is what actually gives the pixelated look -
-// so pick lets you vary the letterforms while keeping that same style.
+// "font" command). The plain entries get TextFace's nearest-neighbor zoom,
+// which is what gives the chunky pixelated look; the "-smooth" entries
+// bilinearly resample instead for anti-aliased edges - same letterforms,
+// different texture.
 struct FontOption {
   const char *name;
   const GFXfont *font;
+  bool smooth;
 };
 const FontOption kFontOptions[] = {
-    {"sans", &FreeSansBold10pt7b}, // default
-    {"mono", &FreeMono8pt7b},
-    {"serif", &FreeSerifBoldItalic12pt7b},
+    {"sans", &FreeSansBold10pt7b, false}, // default
+    {"sans-smooth", &FreeSansBold10pt7b, true},
+    {"mono", &FreeMono8pt7b, false},
+    {"mono-smooth", &FreeMono8pt7b, true},
+    {"serif", &FreeSerifBoldItalic12pt7b, false},
+    {"serif-smooth", &FreeSerifBoldItalic12pt7b, true},
 };
 constexpr size_t kFontOptionCount =
     sizeof(kFontOptions) / sizeof(kFontOptions[0]);
@@ -238,8 +243,8 @@ void printHelp() {
   Serial.println("  <enter>     - advance to next enabled face");
   Serial.println("  list        - list faces with on/off state + rotate interval");
   Serial.println("  <n>         - toggle face n on/off");
-  Serial.println("  text <l1>[|l2] - set ConfigurableText's message and show it");
-  Serial.println("  font [name] - list/set ConfigurableText's font (sans/mono/serif)");
+  Serial.println("  text <l1>[|l2|l3|l4] - set ConfigurableText (up to 4 lines) and show it");
+  Serial.println("  font [name] - list/set ConfigurableText's font (see 'font' with no name)");
   Serial.println("  rotate <ms> - set auto-rotate interval (0 disables)");
   Serial.println("  save        - save current faces + rotate interval to flash");
   Serial.println("  load        - reload saved config from flash");
@@ -317,31 +322,41 @@ void handleSerialCommand(const char *line) {
   if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
     const char *arg = skipSpaces(line + 4);
     if (arg[0] == '\0') {
-      Serial.println("Usage: text <line1>[|line2]");
+      Serial.println("Usage: text <line1>[|line2[|line3[|line4]]]");
       return;
     }
     // Copied out (rather than split in place) since `line`/`arg` alias
-    // serialLine, and setText()'s two arguments both need to stay valid
-    // for the duration of the call.
+    // serialLine, and setText()'s arguments all need to stay valid for
+    // the duration of the call.
     char buf[sizeof(serialLine)];
     strncpy(buf, arg, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
-    char *pipe = strchr(buf, '|');
-    const char *line2 = nullptr;
-    if (pipe) {
+
+    const char *lines[TextFace::kMaxLines] = {nullptr, nullptr, nullptr,
+                                              nullptr};
+    char *cursor = buf;
+    uint8_t lineCount = 0;
+    while (lineCount < TextFace::kMaxLines) {
+      lines[lineCount++] = cursor;
+      char *pipe = strchr(cursor, '|');
+      if (!pipe || lineCount == TextFace::kMaxLines) {
+        break;
+      }
       *pipe = '\0';
-      line2 = pipe + 1;
+      cursor = pipe + 1;
     }
-    configurableTextFace.setText(buf, line2);
+
+    configurableTextFace.setText(lines[0], lines[1], lines[2], lines[3]);
     // Jump straight to it so the new text is immediately visible, rather
     // than leaving it to show up whenever auto-rotate/advance next
     // happens to reach it.
     selectFace(kFaceCount - 1);
     Serial.print("ConfigurableText set to: ");
-    Serial.print(buf);
-    if (line2) {
-      Serial.print(" / ");
-      Serial.print(line2);
+    for (uint8_t i = 0; i < lineCount; i++) {
+      if (i > 0) {
+        Serial.print(" / ");
+      }
+      Serial.print(lines[i]);
     }
     Serial.println();
     return;
@@ -355,7 +370,8 @@ void handleSerialCommand(const char *line) {
     for (size_t i = 0; i < kFontOptionCount; i++) {
       if (strcmp(arg, kFontOptions[i].name) == 0) {
         currentFontIndex = i;
-        configurableTextFace.setFont(kFontOptions[i].font);
+        configurableTextFace.setFont(kFontOptions[i].font,
+                                     kFontOptions[i].smooth);
         selectFace(kFaceCount - 1);
         Serial.print("ConfigurableText font set to: ");
         Serial.println(kFontOptions[i].name);
