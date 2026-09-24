@@ -65,13 +65,20 @@ CandleLitImageFace jackSkellingtonCandleFace(image_jack_skellington,
                                              image_jack_skellington_height);
 CandleLitImageFace skullCandleFace(image_skull, image_skull_width,
                                    image_skull_height);
+// preserveRed=false: these logos are mostly red/crimson themselves, so
+// keeping literal red would leave most of the image a flat static red
+// instead of a pumpkin-style orange/brown gradient (see CandleFlicker::
+// tint()).
 CandleLitImageFace commodoreCandleFace(image_commodore, image_commodore_width,
-                                       image_commodore_height);
+                                       image_commodore_height,
+                                       /*preserveRed=*/false);
 CandleLitImageFace wpiGoatCandleFace(image_wpi_goat, image_wpi_goat_width,
-                                     image_wpi_goat_height);
+                                     image_wpi_goat_height,
+                                     /*preserveRed=*/false);
 CandleLitImageFace wpiGoatHeadCandleFace(image_wpi_goat_head,
                                          image_wpi_goat_head_width,
-                                         image_wpi_goat_head_height);
+                                         image_wpi_goat_head_height,
+                                         /*preserveRed=*/false);
 CandleLitImageFace robotCandleFace(image_robot, image_robot_width,
                                    image_robot_height);
 CandleLitImageFace eyeballCandleFace(image_eyeball, image_eyeball_width,

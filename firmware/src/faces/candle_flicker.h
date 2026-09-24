@@ -30,17 +30,24 @@ public:
   // like variable pumpkin wall thickness - bright/white areas are cut all
   // the way through (full flicker color), darker but non-black areas are
   // left thicker (dim glow), true black is untouched background.
-  uint16_t tint(uint16_t src) const {
+  //
+  // preserveRed keeps red source pixels (eyes, accents) a distinct solid
+  // red instead of folding them into the same orange as everything else -
+  // otherwise they wash out and disappear into the body. Pass false for
+  // source art that's mostly red itself (a school-color logo, say), where
+  // that would instead flatten most of the image to static solid red
+  // instead of the varying, flickering pumpkin-orange every other pixel
+  // gets - i.e. every pixel maps to a shade of orange/brown, none held
+  // out as literal red.
+  uint16_t tint(uint16_t src, bool preserveRed = true) const {
     if (src == 0) {
       return RGB565_BLACK;
     }
     uint8_t r8 = ((src >> 11) & 0x1F) << 3;
     uint8_t g8 = ((src >> 5) & 0x3F) << 2;
     uint8_t b8 = (src & 0x1F) << 3;
-    // Red source pixels (eyes, accents) stay a distinct solid red instead
-    // of being folded into the same orange as everything else - otherwise
-    // they wash out and disappear into the body.
-    bool isRed = r8 > 100 && r8 > (uint16_t)g8 * 2 && r8 > (uint16_t)b8 * 2;
+    bool isRed = preserveRed && r8 > 100 && r8 > (uint16_t)g8 * 2 &&
+                r8 > (uint16_t)b8 * 2;
     if (isRed) {
       return RGB565_RED;
     }

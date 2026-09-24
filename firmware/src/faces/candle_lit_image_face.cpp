@@ -22,7 +22,7 @@ void CandleLitImageFace::draw(Arduino_GFX *gfx) {
       int16_t y = rowOffset + sy;
       for (int16_t x = 0; x < _width; x++) {
         uint16_t src = _image[(int32_t)y * _width + x];
-        stripBuffer[sy * _width + x] = _flicker.tint(src);
+        stripBuffer[sy * _width + x] = _flicker.tint(src, _preserveRed);
       }
     }
     gfx->draw16bitRGBBitmap(x0, y0 + rowOffset, stripBuffer, _width,
