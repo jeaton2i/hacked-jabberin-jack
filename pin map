@@ -1,20 +1,24 @@
-The Jabberin' Jack XL has a different display board.
-This is an attempt to reverse engineer that board to see if we can similarly hack it.
 
-Apparant pinout
-pin  5 - GND
-pin  6 - 3.3v
-pin  7 - fd7 
-pin  8 - fd6
-pin  9 - fd5
-pin 10 - fd4
-pin 11 - fd3
-pin 12 - fd2
-pin 13 - fd1
-pin 14 - fd0
-pin 15 - reb
-pin 16 -
-pin 17 -
-pin 18 - 
-pin 19 - 
-pin 20 - rst-
+  1 x    - not connected
+  2 x    - not connected
+  3 gnd  - rp2040 gnd
+  4 gnd  - rp2040 gnd
+  5 gnd  - rp2040 gnd
+  6 vcc  - rp2040 3v3
+  7 fd7  - rp2040 gp19
+  8 fd6  - rp2040 gp18
+  9 fd5  - rp2040 gp17
+  10 fd4 - rp2040 gp16
+  11 fd3 - rp2040 gp0
+  12 fd2 - rp2040 gp1
+  13 fd1 - rp2040 gp2
+  14 fd0 - rp2040 gp3
+  15 re3 - rp2040 gp4
+  16 wrb - rp2040 gp5
+  17 cle - rp2040 gp6
+  18 cs  - rp2040 gp7
+  20 rst - rp2040 gp20
+  21 x   - not connected
+  22 gnd - rp2040 gnd
+  23 x   - not connected
+  24 x   - not connected
