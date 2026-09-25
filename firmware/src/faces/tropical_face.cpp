@@ -12,8 +12,14 @@ constexpr float kPi = 3.14159265359f;
 // Scene layout, all in panel pixels. Kept close to the panel's visible
 // circular area (centered ~(110, 88), radius ~78 - see the bullseye test
 // pattern) rather than filling the whole rectangle.
-constexpr float kCrownX = 102.0f, kCrownY = 76.0f; // where the fronds meet
-constexpr float kBaseX = 86.0f, kBaseY = 148.0f;   // trunk's foot
+// Shifted 29px up from where the art was first measured against the
+// bullseye pattern - at the original height the topmost wave band ran
+// above the island's top edge and cut across the bare trunk instead of
+// being hidden behind the island (see kIslandCenterY below), and even
+// after the first 24px of that the wave's own ripple crest still poked
+// a hair above the island's top edge.
+constexpr float kCrownX = 102.0f, kCrownY = 47.0f; // where the fronds meet
+constexpr float kBaseX = 86.0f, kBaseY = 119.0f;   // trunk's foot
 
 constexpr float kTrunkBaseWidth = 11.0f, kTrunkTopWidth = 3.0f;
 constexpr float kTrunkBow = 12.0f; // how far the trunk bows sideways
@@ -50,6 +56,16 @@ constexpr float kWaveAmplitude = 3.5f;
 constexpr float kWaveFreq = 2.0f * kPi / 32.0f;
 constexpr int16_t kWaveXStart = 18;
 constexpr int16_t kWaveXEnd = kPanelWidth - 18;
+
+// Small island the trunk stands on, so the waves read as surrounding it
+// rather than cutting straight across the trunk's foot. A plain ellipse:
+// its rounded top pokes just above the trunk's foot (kBaseY) so the mound
+// visibly wraps the foot, and it's drawn after the wave lines so it
+// occludes whatever wave band would otherwise run under it.
+constexpr int16_t kIslandCenterX = (int16_t)kBaseX;
+constexpr int16_t kIslandCenterY = 126;
+constexpr int16_t kIslandRadiusX = 46;
+constexpr int16_t kIslandRadiusY = 13;
 
 int16_t clampInt(int16_t v, int16_t lo, int16_t hi) {
   if (v < lo) {
@@ -116,6 +132,25 @@ void paintTriangle(uint16_t *stripBuffer, int16_t rowOffset,
   paintRegion(stripBuffer, rowOffset, stripHeight, xMin, xMax, yMin, yMax,
              color, [&](int16_t x, int16_t y) {
                return inTriangle(x, y, x0, y0, x1, y1, x2, y2);
+             });
+}
+
+// Integer ellipse test, same reasoning as inTriangle() above: this runs
+// per candidate pixel of the island every frame, so it stays in int32
+// rather than dividing by radii in float.
+bool inEllipse(int16_t x, int16_t y, int16_t cx, int16_t cy, int16_t rx,
+              int16_t ry) {
+  int32_t dx = x - cx, dy = y - cy;
+  return dx * dx * (int32_t)ry * ry + dy * dy * (int32_t)rx * rx <=
+         (int32_t)rx * rx * (int32_t)ry * ry;
+}
+
+void paintEllipse(uint16_t *stripBuffer, int16_t rowOffset,
+                  int16_t stripHeight, int16_t cx, int16_t cy, int16_t rx,
+                  int16_t ry, uint16_t color) {
+  paintRegion(stripBuffer, rowOffset, stripHeight, cx - rx, cx + rx, cy - ry,
+             cy + ry, color, [&](int16_t x, int16_t y) {
+               return inEllipse(x, y, cx, cy, rx, ry);
              });
 }
 
@@ -277,6 +312,9 @@ void TropicalFace::draw(Arduino_GFX *gfx) {
       paintWaveLine(stripBuffer, rowOffset, stripHeight, kWaveBaseY[li],
                    _wavePhase + li * 0.7f, color);
     }
+
+    paintEllipse(stripBuffer, rowOffset, stripHeight, kIslandCenterX,
+                kIslandCenterY, kIslandRadiusX, kIslandRadiusY, color);
 
     gfx->draw16bitRGBBitmap(0, rowOffset, stripBuffer, kPanelWidth,
                             stripHeight);

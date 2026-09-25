@@ -18,7 +18,9 @@
 #include "faces/eye_look_face.h"
 #include "faces/eye_look_motion.h"
 #include "faces/face.h"
+#include "faces/candle_lit_robot_look_face.h"
 #include "faces/pacman_face.h"
+#include "faces/robot_look_face.h"
 #include "faces/static_image_face.h"
 #include "faces/test_pattern_face.h"
 #include "faces/text_face.h"
@@ -63,6 +65,7 @@ TextFace configurableTextFace("Set my text!");
 PacManFace pacManFace;
 TropicalFace tropicalFace;
 EyeLookFace eyeLookFace;
+RobotLookFace robotLookFace;
 
 CandleLitImageFace jackSkellingtonCandleFace(image_jack_skellington,
                                              image_jack_skellington_width,
@@ -88,6 +91,7 @@ CandleLitImageFace robotCandleFace(image_robot, image_robot_width,
 CandleLitImageFace eyeballCandleFace(image_eyeball, image_eyeball_width,
                                      image_eyeball_height);
 CandleLitEyeLookFace eyeLookCandleFace;
+CandleLitRobotLookFace robotLookCandleFace;
 
 Face *faces[] = {&triangleFace,
                  &testPatternFace,
@@ -103,6 +107,7 @@ Face *faces[] = {&triangleFace,
                  &robotFace,
                  &eyeballFace,
                  &eyeLookFace,
+                 &robotLookFace,
                  &jackSkellingtonCandleFace,
                  &skullCandleFace,
                  &commodoreCandleFace,
@@ -111,6 +116,7 @@ Face *faces[] = {&triangleFace,
                  &robotCandleFace,
                  &eyeballCandleFace,
                  &eyeLookCandleFace,
+                 &robotLookCandleFace,
                  &happyHalloweenFace,
                  &booFace,
                  &configurableTextFace};
@@ -128,6 +134,7 @@ const char *faceNames[] = {"TriangleFace",
                            "Robot",
                            "Eyeball",
                            "EyeballLookAround",
+                           "RobotLookAround",
                            "JackSkellingtonCandleLit",
                            "SkullCandleLit",
                            "CommodoreCandleLit",
@@ -136,6 +143,7 @@ const char *faceNames[] = {"TriangleFace",
                            "RobotCandleLit",
                            "EyeballCandleLit",
                            "EyeballLookAroundCandleLit",
+                           "RobotLookAroundCandleLit",
                            "HappyHalloweenText",
                            "BooText",
                            "ConfigurableText"};
@@ -147,9 +155,34 @@ static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
 // Test pattern is noisy right now (see project notes) - off by default,
 // but stays in the rotation/menu so it's a one-command toggle to check.
 const bool kDefaultFaceEnabled[kFaceCount] = {
-    true,  false, true, true, true, true, true, true,  true, true, true,
-    true,  true,  true, true, true, true, true, true,  true, true, true,
-    true,  true,  true};
+    true,  // TriangleFace
+    false, // TestPatternFace
+    false, // Checkerboard
+    false, // Bullseye
+    true,  // PacMan
+    true,  // Tropical
+    false, // JackSkellington
+    false, // Skull
+    false, // Commodore
+    false, // WpiGoat
+    false, // WpiGoatHeadOnly
+    false, // Robot
+    false, // Eyeball
+    true,  // EyeballLookAround
+    true,  // RobotLookAround
+    true,  // JackSkellingtonCandleLit
+    false, // SkullCandleLit
+    false, // CommodoreCandleLit
+    false, // WpiGoatCandleLit
+    true,  // WpiGoatHeadCandleLit
+    false, // RobotCandleLit
+    false, // EyeballCandleLit
+    true,  // EyeballLookAroundCandleLit
+    true,  // RobotLookAroundCandleLit
+    false, // HappyHalloweenText 
+    false, // BooText
+    false  // ConfigurableText
+};
 bool faceEnabled[kFaceCount];
 
 // Fonts ConfigurableTextFace can be switched between over serial (see the

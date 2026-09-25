@@ -14,7 +14,7 @@ void Display::begin() {
 
   Arduino_DataBus *bus =
       new Arduino_RPiPicoPAR8(PIN_DC, PIN_CS, PIN_WR, PIN_RD);
-  _gfx = new Arduino_ILI9225(bus, PIN_RST, /*rotation=*/1);
+  _gfx = new Arduino_ILI9225(bus, PIN_RST, /*rotation=*/3);
   _gfx->begin();
   _gfx->fillScreen(RGB565_BLACK);
 }
