@@ -4,19 +4,20 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x4A4B3102; // "JK" + format version 2
+constexpr uint32_t kMagic = 0x4A4B3103; // "JK" + format version 3
 
 struct StoredPrefs {
   uint32_t magic;
   uint32_t enabledMask;
   uint32_t rotateMs;
   uint32_t brightnessPercent;
+  uint32_t randomOrder;
   uint32_t checksum;
 };
 
 uint32_t checksumOf(const StoredPrefs &prefs) {
   return prefs.magic ^ prefs.enabledMask ^ prefs.rotateMs ^
-         prefs.brightnessPercent;
+         prefs.brightnessPercent ^ prefs.randomOrder;
 }
 
 } // namespace
@@ -34,6 +35,7 @@ bool loadPrefs(Prefs &out) {
   out.enabledMask = stored.enabledMask;
   out.rotateMs = stored.rotateMs;
   out.brightnessPercent = stored.brightnessPercent;
+  out.randomOrder = stored.randomOrder;
   return true;
 }
 
@@ -43,6 +45,7 @@ void savePrefs(const Prefs &prefs) {
   stored.enabledMask = prefs.enabledMask;
   stored.rotateMs = prefs.rotateMs;
   stored.brightnessPercent = prefs.brightnessPercent;
+  stored.randomOrder = prefs.randomOrder;
   stored.checksum = checksumOf(stored);
 
   EEPROM.begin(sizeof(StoredPrefs));
