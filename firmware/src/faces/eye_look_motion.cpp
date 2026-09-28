@@ -104,9 +104,95 @@ uint16_t blend(uint16_t a, uint16_t b, float t) {
   uint8_t bl = ab + (bb - ab) * t;
   return (r << 11) | (g << 5) | bl;
 }
+
+
+// Recomputes RGB at a fixed target hue but the *source* pixel's own value
+// (brightness) and saturation - i.e. keeps whatever light/dark and
+// pale/vivid pattern the blue art already has (its highlights, the fade
+// toward the pupil and toward the specular glint), just rotated to a
+// different hue instead of collapsing everything to one flat tint scaled
+// only by brightness (an earlier version of this did that, and it turned
+// out to both under-represent the source's actual highlight fade and,
+// worse, leave antialiased blend pixels near the pupil/highlight
+// boundaries - which don't cleanly pass a "is this blue" test - as
+// leftover native blue, showing up as stray pale/white flecks against a
+// red or brown iris. Reusing S/V directly needs no such classification:
+// a true-black source pixel (V=0) and a true-white/gray one (S=0) both
+// map to themselves under this math regardless of target hue, so every
+// pixel in the iris disc can go through the same formula uniformly.
+// Per-color knobs, tuned by eye against the real panel (a literal hue swap
+// at the source's own value read as neon-bright for green and, combined
+// with a preview bug that also recolored the sclera, seemed to need
+// desaturating for brown when it actually just needed to be darker):
+// how far value/saturation get scaled down from the source blue's own
+// (0 = fully desaturate/blacken, 100 = keep as-is), and - for brown only -
+// how much of the way from "red" to "halfway between red and yellow" its
+// second channel sits (0 = same as red's single non-hue channel, 100 =
+// exactly halfway).
+struct IrisColorParams {
+  uint8_t valuePercent;
+  uint8_t satPercent;
+  uint8_t midPercent; // brown only
+};
+constexpr IrisColorParams kIrisColorParams[] = {
+    {100, 100, 0},  // kEyeColorBlue - unused, see recolorIris()
+    {100, 100, 0},  // kEyeColorRed
+    {22, 100, 0},   // kEyeColorGreen - a literal swap read as neon-bright
+    {35, 100, 40},  // kEyeColorBrown
+};
+
+uint16_t recolorIris(uint16_t src, EyeColor color) {
+  if (color == kEyeColorBlue) {
+    return src; // native art color - nothing to do
+  }
+  uint8_t r = ((src >> 11) & 0x1F) << 3;
+  uint8_t g = ((src >> 5) & 0x3F) << 2;
+  uint8_t b = (src & 0x1F) << 3;
+
+  uint8_t maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  uint8_t minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  uint16_t sat = maxC > 0 ? (uint16_t)(maxC - minC) * 255 / maxC : 0; // 0..255
+  // Lifts mid-tones (peak ~+64 around maxC=128) while leaving both ends
+  // untouched (0 at maxC=0 and maxC=255) - a flat "+X toward white" lift
+  // tried first also brightened true black into gray, turning the pupil
+  // a visible charcoal instead of staying solid black.
+  uint16_t lift = (uint16_t)(255 - maxC) * maxC / 255;
+  uint16_t value = maxC + lift; // 0..255
+
+  const IrisColorParams &params = kIrisColorParams[color];
+  // Darkening scales with how saturated the source pixel already was, not
+  // applied flat: a genuinely colored iris-ring pixel (high sat) gets the
+  // full darken amount, but a neutral one - the specular highlight, or the
+  // ring of white sclera intentionally folded into this same crop for
+  // blending at its edge (see this function's block comment) - has sat
+  // near 0 and so is left at ~100%, same as it always was. Applying the
+  // flat percent to every pixel regardless of its own saturation (an
+  // earlier version of this did that) darkened those white areas into
+  // visible gray right along with the actual iris color.
+  uint16_t valuePercentHere =
+      100 - (uint16_t)(100 - params.valuePercent) * sat / 255;
+  value = value * valuePercentHere / 100;
+  sat = sat * params.satPercent / 100;
+
+  uint16_t chroma = value * sat / 255;
+  uint8_t low = (uint8_t)(value - chroma); // hue's "0%" channel(s)
+  uint8_t mid =
+      (uint8_t)(value - chroma * params.midPercent / 100); // brown only
+  switch (color) {
+  case kEyeColorRed:
+    return (((uint8_t)value >> 3) << 11) | ((low >> 2) << 5) | (low >> 3);
+  case kEyeColorGreen:
+    return ((low >> 3) << 11) | (((uint8_t)value >> 2) << 5) | (low >> 3);
+  case kEyeColorBrown: // hue ~30 deg, between red and yellow
+    return (((uint8_t)value >> 3) << 11) | ((mid >> 2) << 5) | (low >> 3);
+  default:
+    return src;
+  }
+}
 } // namespace
 
 bool EyeLookMotion::s_debugLogging = false;
+EyeColor EyeLookMotion::s_color = kEyeColorBlue;
 
 void EyeLookMotion::reset() {
   randomSeed(micros());
@@ -212,7 +298,8 @@ uint16_t EyeLookMotion::sample(int16_t x, int16_t y) const {
   // i.e. the original unmodified iris/pupil artwork, just relocated.
   int16_t srcX = clampCoord(kIrisRestXInt + dx, kPanelWidth - 1);
   int16_t srcY = clampCoord(kIrisRestYInt + dy, kPanelHeight - 1);
-  uint16_t iris = image_eyeball[(int32_t)srcY * kPanelWidth + srcX];
+  uint16_t iris = recolorIris(
+      image_eyeball[(int32_t)srcY * kPanelWidth + srcX], s_color);
   if (distSq <= kInnerSqInt) {
     return iris;
   }

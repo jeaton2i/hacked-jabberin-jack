@@ -807,6 +807,7 @@ void printHelp() {
   cmdOut->println("  settime <year> <month> <day> - feed today's actual date to the Countdown face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  setclock <hour 0-23> <minute> <second> - feed the current wall-clock time to the Clock face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  clockformat [12|24] - show, or set, whether the Clock face displays 12- or 24-hour time (default 24)");
+  cmdOut->println("  eyecolor [blue|red|green|brown] - show, or set, the animated eye faces' iris color (default blue; only affects the plain, not candle-lit, eye faces)");
   cmdOut->println("  audio <tone|voice> - play the synthesized test tone, or the test speech clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
   cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
@@ -824,6 +825,20 @@ void printFontList(size_t currentFontIndex) {
     cmdOut->print("  ");
     cmdOut->print(kFontOptions[i].name);
     cmdOut->println(i == currentFontIndex ? " (current)" : "");
+  }
+}
+
+const char *eyeColorName(EyeColor color) {
+  switch (color) {
+  case kEyeColorRed:
+    return "red";
+  case kEyeColorGreen:
+    return "green";
+  case kEyeColorBrown:
+    return "brown";
+  case kEyeColorBlue:
+  default:
+    return "blue";
   }
 }
 
@@ -1114,6 +1129,32 @@ void handleSerialCommand(const char *line) {
       return;
     }
     cmdOut->print("Clock format set to: ");
+    cmdOut->println(arg);
+    return;
+  }
+  if (strncmp(line, "eyecolor", 8) == 0 &&
+      (line[8] == '\0' || line[8] == ' ')) {
+    const char *arg = skipSpaces(line + 8);
+    if (arg[0] == '\0') {
+      cmdOut->print("Eye color: ");
+      cmdOut->println(eyeColorName(EyeLookMotion::color()));
+      return;
+    }
+    EyeColor color;
+    if (strcmp(arg, "blue") == 0) {
+      color = kEyeColorBlue;
+    } else if (strcmp(arg, "red") == 0) {
+      color = kEyeColorRed;
+    } else if (strcmp(arg, "green") == 0) {
+      color = kEyeColorGreen;
+    } else if (strcmp(arg, "brown") == 0) {
+      color = kEyeColorBrown;
+    } else {
+      cmdOut->println("Usage: eyecolor [blue|red|green|brown]");
+      return;
+    }
+    EyeLookMotion::setColor(color);
+    cmdOut->print("Eye color set to: ");
     cmdOut->println(arg);
     return;
   }

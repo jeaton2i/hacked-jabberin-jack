@@ -2,6 +2,18 @@
 
 #include <stdint.h>
 
+// Iris color: the source art (image_eyeball) is baked in blue, and
+// kEyeColorBlue passes every iris pixel through unchanged. The others are
+// recolored live in sample() (see its comment) - shared across every
+// EyeLookMotion instance, like CandleFlicker::brightness(), since there's
+// only one physical set of eyes to match.
+enum EyeColor {
+  kEyeColorBlue,
+  kEyeColorRed,
+  kEyeColorGreen,
+  kEyeColorBrown,
+};
+
 // Shared "look around" motion + pixel sampling for the eyeball image's
 // iris/pupil disc: darts to a new offset at irregular intervals and eases
 // toward it, then answers what color the source eyeball image should show
@@ -33,6 +45,10 @@ public:
   static void setDebugLogging(bool enabled) { s_debugLogging = enabled; }
   static bool debugLogging() { return s_debugLogging; }
 
+  // Runtime iris color switch - see main.cpp's "eyecolor" serial command.
+  static void setColor(EyeColor color) { s_color = color; }
+  static EyeColor color() { return s_color; }
+
 private:
   void pickNewTarget();
 
@@ -60,4 +76,5 @@ private:
   unsigned long _lastSlowFrameLogMillis = 0;
 
   static bool s_debugLogging;
+  static EyeColor s_color;
 };
