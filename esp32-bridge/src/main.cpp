@@ -17,6 +17,8 @@
 #include <WebServer.h>
 #include <WiFiManager.h>
 
+#include "assets/test_word.h"
+#include "audio/i2s_player.h"
 #include "jack_link.h"
 #include "web_ui.h"
 
@@ -32,6 +34,14 @@ constexpr const char *kSetupApPassword = "pumpkin123"; // >= 8 chars for WPA2
 // that another line is still coming).
 constexpr unsigned long kReplyTimeoutMs = 1500;
 constexpr unsigned long kReplyQuietGapMs = 150;
+
+// How often to ask the RP2040 whether it has audio queued for this
+// board's speaker (see the RP2040's "audio esp-tone"/"audio esp-voice"
+// commands and pendingEsp32Audio) - frequent enough that a trigger feels
+// responsive, infrequent enough not to spam the link or matter if a
+// request happens to land while a query is already in flight (nothing
+// actually runs concurrently here; see checkForRp2040AudioTrigger()).
+constexpr unsigned long kAudioTriggerPollMs = 500;
 } // namespace
 
 WebServer server(80);
@@ -192,6 +202,42 @@ void handleApiLinkPinsPost() {
   ESP.restart();
 }
 
+// Polls the RP2040 for audio it wants played on this board's own speaker
+// (see its "audio esp-tone"/"audio esp-voice" commands) and plays it
+// locally if so - see kAudioTriggerPollMs's comment for why polling
+// rather than the RP2040 pushing this unprompted. A stale/no-reply link
+// (jackLinkReady() false, or a timed-out empty reply) is silently treated
+// the same as "none" - nothing to play, try again next cycle.
+void checkForRp2040AudioTrigger() {
+  if (!jackLinkReady()) {
+    return;
+  }
+  String reply = sendCommandAndRead("audiotrigger");
+  reply.trim();
+  if (reply == "tone") {
+    I2sPlayer::playTestTone();
+  } else if (reply == "voice") {
+    I2sPlayer::playClip(test_word, test_word_length, test_word_sample_rate);
+  }
+}
+
+// Plays audio on this board's own speaker directly, independent of the
+// RP2040 entirely - lets the web UI (or a script) test this board's I2S
+// wiring without needing the RP2040 attached at all.
+void handleApiLocalAudio() {
+  String kind = server.arg("plain");
+  kind.trim();
+  if (kind == "tone") {
+    I2sPlayer::playTestTone();
+  } else if (kind == "voice") {
+    I2sPlayer::playClip(test_word, test_word_length, test_word_sample_rate);
+  } else {
+    server.send(400, "text/plain", "Usage: tone|voice");
+    return;
+  }
+  server.send(200, "text/plain", "OK");
+}
+
 void handleNotFound() { server.send(404, "text/plain", "Not found"); }
 
 void setup() {
@@ -223,17 +269,29 @@ void setup() {
                    "the IP address above still works");
   }
 
+  I2sPlayer::begin();
+
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/status", HTTP_GET, handleApiStatus);
   server.on("/api/command", HTTP_POST, handleApiCommand);
   server.on("/api/link-pins", HTTP_GET, handleApiLinkPinsGet);
   server.on("/api/link-pins", HTTP_POST, handleApiLinkPinsPost);
+  server.on("/api/local-audio", HTTP_POST, handleApiLocalAudio);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("Web server started");
 }
 
-void loop() { server.handleClient(); }
+void loop() {
+  server.handleClient();
+
+  static unsigned long lastAudioTriggerPollMs = 0;
+  unsigned long now = millis();
+  if (now - lastAudioTriggerPollMs >= kAudioTriggerPollMs) {
+    lastAudioTriggerPollMs = now;
+    checkForRp2040AudioTrigger();
+  }
+}
 
 #ifdef JACK_LINK_USB_HOST
 // The esp32s3_usbhost env's espidf+arduino hybrid framework doesn't

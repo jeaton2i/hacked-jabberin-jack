@@ -11,6 +11,8 @@
 #include "assets/image_skull.h"
 #include "assets/image_wpi_goat.h"
 #include "assets/image_wpi_goat_head.h"
+#include "assets/test_word.h"
+#include "audio/i2s_player.h"
 #include "display/display.h"
 #include "faces/bullseye_face.h"
 #include "faces/candle_flicker.h"
@@ -289,6 +291,18 @@ bool randomOrder = false;
 // which is exactly the kind of thing worth changing without a reflash.
 int8_t esp32TxPin = kDefaultPinEsp32Tx;
 int8_t esp32RxPin = kDefaultPinEsp32Rx;
+
+// Queues audio for the ESP32 bridge's own speaker to play (see the
+// "audio esp-tone"/"audio esp-voice" commands and "audiotrigger" below).
+// The RP2040 has no way to push data to the ESP32 unprompted without
+// risking corrupting whatever it might currently be asking over the same
+// link (e.g. a "status" reply mid-flight), so instead this just sets a
+// flag the ESP32 polls for on its own schedule via "audiotrigger", which
+// atomically reads and clears it - the same request/response shape as
+// every other command here, just with the roles of "who wanted this"
+// reversed.
+enum class Esp32AudioTrigger { None, Tone, Voice };
+Esp32AudioTrigger pendingEsp32Audio = Esp32AudioTrigger::None;
 
 unsigned long lastAutoRotateMs = 0;
 
@@ -572,6 +586,9 @@ void printHelp() {
   cmdOut->println("  brightness [percent] - show/set candle brightness (100=original)");
   cmdOut->println("  order [random|in-order] - show/set face advance order");
   cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
+  cmdOut->println("  audio <tone|voice> - play the synthesized test tone, or the test speech clip, over this board's own I2S output");
+  cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
+  cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
   cmdOut->println("  save        - save current faces + rotate interval + brightness + order + ESP32 link pins to flash");
   cmdOut->println("  load        - reload saved config from flash");
   cmdOut->println("  reset       - restore compiled-in defaults (not saved)");
@@ -602,8 +619,11 @@ const char *skipSpaces(const char *line) {
 // convenience); "list"/"help" print info; a bare number toggles that face's
 // on/off state; "rotate", "brightness", "order", "esp32link", "save",
 // "load", and "reset" manage persisted config; "text" sets
-// ConfigurableTextFace's message; "font" lists/sets its font; "debug"
-// toggles EyeLookMotion's diagnostic logging (see printHelp for details).
+// ConfigurableTextFace's message; "font" lists/sets its font; "audio"
+// plays a test tone or speech clip over this board's own I2S output, or
+// queues one for the ESP32 bridge's speaker instead ("audiotrigger" is how
+// the bridge polls for that); "debug" toggles EyeLookMotion's diagnostic
+// logging (see printHelp for details).
 void handleSerialCommand(const char *line) {
   if (line[0] == '\0') {
     advanceFace();
@@ -752,6 +772,44 @@ void handleSerialCommand(const char *line) {
     cmdOut->flush();
     delay(50);
     rp2040.reboot();
+    return;
+  }
+  if (strncmp(line, "audio", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
+    const char *arg = skipSpaces(line + 5);
+    if (strcmp(arg, "tone") == 0) {
+      I2sPlayer::playTestTone();
+      cmdOut->println("Played test tone");
+    } else if (strcmp(arg, "voice") == 0) {
+      I2sPlayer::playClip(test_word, test_word_length, test_word_sample_rate);
+      cmdOut->println("Played test voice clip");
+    } else if (strcmp(arg, "esp-tone") == 0) {
+      pendingEsp32Audio = Esp32AudioTrigger::Tone;
+      cmdOut->println("Queued for the ESP32 bridge to play: tone");
+    } else if (strcmp(arg, "esp-voice") == 0) {
+      pendingEsp32Audio = Esp32AudioTrigger::Voice;
+      cmdOut->println("Queued for the ESP32 bridge to play: voice");
+    } else {
+      cmdOut->println("Usage: audio <tone|voice|esp-tone|esp-voice>");
+    }
+    return;
+  }
+  if (strcmp(line, "audiotrigger") == 0) {
+    // Meant to be polled by the ESP32 bridge, not typed by a human (see
+    // pendingEsp32Audio's comment) - reads and clears in one step so a
+    // trigger only ever fires once even if polled again before the ESP32
+    // gets around to acting on it.
+    switch (pendingEsp32Audio) {
+    case Esp32AudioTrigger::Tone:
+      cmdOut->println("tone");
+      break;
+    case Esp32AudioTrigger::Voice:
+      cmdOut->println("voice");
+      break;
+    default:
+      cmdOut->println("none");
+      break;
+    }
+    pendingEsp32Audio = Esp32AudioTrigger::None;
     return;
   }
   if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
@@ -911,6 +969,8 @@ void setup() {
 
   leds.begin();
   leds.show(); // all off until the first updateLeds() in loop()
+
+  I2sPlayer::begin();
 
   display.begin();
   Serial.println("Display initialized");

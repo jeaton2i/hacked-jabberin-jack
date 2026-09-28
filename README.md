@@ -41,7 +41,15 @@ Based on the work from pburgess:
 ## Stretch Goals
 
 - Audio support
-  - Speaking voice (pre-rendered clips)
+  - Speaking voice (pre-rendered clips) — basic playback started, see
+    `docs/audio-i2s-wiring.md`: a MAX98357A I2S amp on each board, with a
+    test tone and one embedded test speech clip so far. The RP2040 plays
+    them on its own speaker (`audio tone`/`audio voice`); the optional
+    ESP32 bridge can play them on its own separate speaker too, either
+    from its web UI or triggered remotely by the RP2040
+    (`audio esp-tone`/`audio esp-voice`, polled over the existing bridge
+    link). Still just test tone + one test word - actual pre-rendered
+    speech content is the remaining piece.
   - Speaking voice (text to speech)
   - Lip sync to external audio / microphone
 - Sensor support
@@ -70,9 +78,14 @@ Based on the work from pburgess:
   hardware assumptions.
 - `docs/esp32-network-bridge.md` — ESP32 bridge wiring, Wi-Fi setup, and
   its web UI/API.
+- `docs/audio-i2s-wiring.md` — I2S audio (MAX98357A) wiring and the
+  `audio <tone|voice>` command.
 - `tools/convert_image_to_rgb565.py` — converts an image in `sample-images/`
   into a PROGMEM RGB565 header under `firmware/src/assets/` for use by
   `StaticImageFace`/`CandleLitImageFace`.
+- `tools/convert_wav_to_pcm.py` — converts a WAV file in `sample-audio/`
+  into a mono 16-bit PCM header under `firmware/src/assets/` for
+  `I2sPlayer::playClip()`.
 - `tools/face_preview.py` — renders a face off-device (no hardware needed)
   for a quick look before flashing.
 - `Arduino_GFX/` and `rp2040-doom-LCD/` — reference material only, not part
@@ -111,6 +124,9 @@ command list; send `help` any time to see it again.
 | `brightness [percent]` | Show, or set, the candle brightness (`100` = the flicker's original intensity; default is `115`) |
 | `order [random\|in-order]` | Show, or set, whether auto-rotate/next-face advances in list order or picks a random enabled face |
 | `esp32link [tx rx]` | Show, or set (as GP numbers), the pins the optional ESP32 bridge's UART is wired to - setting them saves the whole config and reboots to apply; see `docs/esp32-network-bridge.md` for which pins are actually valid |
+| `audio <tone\|voice>` | Play the synthesized test tone, or the test speech clip, over this board's own optional I2S audio output - see `docs/audio-i2s-wiring.md` |
+| `audio <esp-tone\|esp-voice>` | Queue the same to instead play on the optional ESP32 bridge's own speaker (it polls for this - see `audiotrigger`) |
+| `audiotrigger` | Read + clear the pending ESP32 audio queue - polled by the ESP32 bridge, not really meant for humans |
 | `save`        | Persist the current face selection + rotate interval + brightness + order + ESP32 link pins to flash |
 | `load`        | Reload the saved config from flash                          |
 | `reset`       | Restore the compiled-in defaults (does not touch flash)     |

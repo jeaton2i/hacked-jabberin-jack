@@ -212,6 +212,21 @@ static const char INDEX_HTML[] = R"HTML(
   </section>
 
   <section>
+    <h2>Audio</h2>
+    <p style="color:var(--muted);font-size:0.85em;margin:0 0 10px;">
+      Plays on this board's own I2S speaker (if wired - see
+      docs/audio-i2s-wiring.md), independent of the RP2040. The RP2040 can
+      also trigger these remotely via its "audio esp-tone"/"audio
+      esp-voice" commands - this board polls for that on its own, so
+      nothing needs to be open here for it to work.
+    </p>
+    <div class="row">
+      <button id="localAudioToneBtn" class="secondary">Play Tone</button>
+      <button id="localAudioVoiceBtn" class="secondary">Play Voice</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Bridge Link</h2>
     <p style="color:var(--muted);font-size:0.85em;margin:0 0 10px;">
       Wiring between this board and the RP2040 - see
@@ -504,6 +519,20 @@ document.getElementById("jackLinkPinsApplyBtn").addEventListener("click", functi
     return;
   }
   sendCommand("esp32link " + txPin + " " + rxPin).then(refreshStatus);
+});
+
+function playLocalAudio(kind) {
+  return fetch("/api/local-audio", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: kind
+  });
+}
+document.getElementById("localAudioToneBtn").addEventListener("click", function () {
+  playLocalAudio("tone");
+});
+document.getElementById("localAudioVoiceBtn").addEventListener("click", function () {
+  playLocalAudio("voice");
 });
 
 document.getElementById("saveBtn").addEventListener("click", function () {

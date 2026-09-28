@@ -217,7 +217,14 @@ separate device - refresh once it's back). On the USB host build, the
 "This board's pins" half of that section is replaced with a note that
 there's nothing to configure there.
 
-Three small HTTP endpoints back the page, in case you want to script it
+Its "Audio" section plays this bridge's own I2S speaker directly (if
+wired - see `docs/audio-i2s-wiring.md`), independent of the RP2040
+entirely - useful for testing the ESP32's own audio wiring without the
+RP2040 attached at all. The RP2040 can also trigger the same playback
+remotely (`audio esp-tone`/`audio esp-voice`); this bridge polls for that
+on its own every 500ms regardless of whether the web page is open.
+
+Four small HTTP endpoints back the page, in case you want to script it
 instead:
 
 - `GET /api/status` - the RP2040's own JSON status snapshot, passed straight
@@ -232,6 +239,8 @@ instead:
   `{"supported":false,"rxPin":-1,"txPin":-1}` (USB host build).
 - `POST /api/link-pins` - form fields `rxPin`/`txPin`; persists them and
   restarts the bridge to apply. Only meaningful on the UART build.
+- `POST /api/local-audio` - body `tone` or `voice`; plays immediately on
+  this bridge's own speaker, no RP2040 involved.
 
 ## What's not persisted
 
