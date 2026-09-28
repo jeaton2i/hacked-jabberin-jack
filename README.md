@@ -25,9 +25,11 @@ Based on the work from pburgess:
 - Simple test pattern mode
 - Basic triangle-face pumpkin static face
   - Flickering fire-like illumination
-  - 3D style — done: every carved opening (eyes, nose, mouth) is shaded
-    top-to-bottom as if lit by a candle low in the body, not filled flat
-    (see `verticalShadeScale()` in `firmware/src/faces/triangle_face.cpp`)
+  - 3D style — done: every carved opening (eyes, nose, mouth) shows a
+    visible wall of pumpkin flesh (a fixed-width darker red-orange band)
+    around its cut edge, with a hot yellow-white glow through the
+    interior, rather than filled flat (see `kWallWidthPx`'s comment in
+    `firmware/src/faces/triangle_face.cpp`)
 - Dynamic animated pumpkin face
   - Moving mouth for future lip sync
   - Moving eyes/nose
@@ -189,8 +191,9 @@ reordering or adding/removing faces in `main.cpp`.
   and face order) can be changed and persisted to flash over the serial
   console, physical buttons, or the optional ESP32 web UI — see "Runtime
   Controls" above and `docs/esp32-network-bridge.md`.
-- `TriangleFace` shades every carved opening top-to-bottom rather than
-  filling it flat, for a 3D-carved look (see "Initial Goals" above).
+- `TriangleFace` shows a visible wall of pumpkin flesh around every carved
+  opening with a hot glowing interior, rather than filling it flat, for a
+  3D-carved look (see "Initial Goals" above).
 - Overlays, moving mouth/eyes, full audio content, and sensors remain
   future work.
 

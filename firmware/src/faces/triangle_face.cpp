@@ -14,59 +14,97 @@ constexpr int16_t kMouthBufferHeight = 60;
 // eye on the 220x176 panel) with headroom; reused for each shape in turn.
 constexpr int16_t kFeatureBufferSize = 80;
 
-// Darkest point of the vertical shading gradient below, as a fraction of
-// full brightness - keeps the topmost points of each carved opening dimly
-// visible rather than fading all the way to black, the same idea as
-// CandleFlicker::tint()'s kDimFloor for carved image faces.
-constexpr float kShadeMinScale = 0.45f;
+// What actually reads as "carved," per a real jack-o-lantern reference
+// photo, is an actual visible wall of pumpkin flesh around each opening -
+// a band of a distinctly darker, more saturated color with a fairly crisp
+// boundary where it meets the glow, not a smooth gradient. A soft
+// continuous blend from edge to center (tried first) doesn't read as a
+// wall at all, no matter how dark it gets at the very edge, because
+// nothing in the image marks where the "wall" actually ends. So each
+// opening is now drawn in two explicit zones:
+//   1. A fixed-width wall band (kWallWidthPx, in real screen pixels - not
+//      scaled to the shape's size, so it stays visible even on the small
+//      nose) right at the cut edge, itself fading from edgeColor
+//      (darkest, right at the true boundary) to wallColor (its inner
+//      face, where it meets the glow) - still a solid, clearly-flesh-toned
+//      band rather than a thin highlight.
+//   2. The glowing interior beyond that band, fading from that same
+//      wallColor into hotColor over kInnerGlowBandFraction of whatever
+//      inradius remains inside the wall - saturating quickly so most of
+//      the interior reads as a uniform hot glow, like looking through the
+//      cut at a light source.
+constexpr float kWallWidthPx = 4.0f;
+constexpr float kInnerGlowBandFraction = 0.5f;
 
-// A plain top-to-bottom brightness fade alone reads as a flat color tint,
-// not depth - what actually sells "carved" in flat 2D art is contrast
-// between a shape's edge and its interior, like a beveled cut catching
-// light along its rim. So every carved opening also gets a thin band at
-// full brightness (kRimScale, deliberately ignoring the vertical gradient
-// entirely - the cut edge catches some light all the way around,
-// regardless of which side is otherwise in shadow) running kRimWidthPx
-// pixels in from its boundary, with the gradient only showing through in
-// the interior beyond that.
-constexpr float kRimScale = 1.0f;
-constexpr float kRimWidthPx = 2.0f;
-
-uint16_t scaleColor(uint16_t color, float scale) {
-  if (scale >= 1.0f) {
-    return color;
+uint16_t blendColor(uint16_t colorA, uint16_t colorB, float t) {
+  if (t <= 0.0f) {
+    return colorA;
   }
-  if (scale < 0.0f) {
-    scale = 0.0f;
+  if (t >= 1.0f) {
+    return colorB;
   }
-  uint8_t r5 = (color >> 11) & 0x1F;
-  uint8_t g6 = (color >> 5) & 0x3F;
-  uint8_t b5 = color & 0x1F;
-  uint8_t outR5 = (uint8_t)(r5 * scale + 0.5f);
-  uint8_t outG6 = (uint8_t)(g6 * scale + 0.5f);
-  uint8_t outB5 = (uint8_t)(b5 * scale + 0.5f);
-  return (outR5 << 11) | (outG6 << 5) | outB5;
+  int aR = (colorA >> 11) & 0x1F;
+  int aG = (colorA >> 5) & 0x3F;
+  int aB = colorA & 0x1F;
+  int bR = (colorB >> 11) & 0x1F;
+  int bG = (colorB >> 5) & 0x3F;
+  int bB = colorB & 0x1F;
+  int outR = aR + (int)((bR - aR) * t + 0.5f);
+  int outG = aG + (int)((bG - aG) * t + 0.5f);
+  int outB = aB + (int)((bB - aB) * t + 0.5f);
+  return ((uint16_t)outR << 11) | ((uint16_t)outG << 5) | (uint16_t)outB;
 }
 
-// Simulates a single light source low in the pumpkin body, like a candle
-// sitting at its base: every carved opening (eyes, nose, mouth) reads as a
-// flat 2D silhouette without this, so each one's color is scaled by how
-// far down the face a given point falls within [topY, bottomY] (spanning
-// from the eyes' own top down to the mouth's own bottom) - brighter near
-// the bottom of each cavity, dimmer near the top, same direction for
-// every feature so the whole face reads as lit from one place.
-float verticalShadeScale(int16_t y, int16_t topY, int16_t bottomY) {
-  int16_t span = bottomY - topY;
-  if (span < 1) {
-    span = 1;
+// The hot core color a carved opening's interior glows toward: pushes
+// green up toward red (yellow) and adds a touch of blue, for a
+// white-hot look rather than just a brighter version of the same orange.
+uint16_t hotColor(uint16_t base) {
+  int r5 = (base >> 11) & 0x1F;
+  int g6 = (base >> 5) & 0x3F;
+  int hotG = g6 + (63 - g6) * 3 / 5;
+  if (hotG > 63) {
+    hotG = 63;
   }
-  float t = (float)(y - topY) / (float)span;
+  return ((uint16_t)r5 << 11) | ((uint16_t)hotG << 5) | (uint16_t)6;
+}
+
+// The wall band's inner face color, where it meets the glowing interior -
+// a solid, clearly-flesh-toned red-orange, less green than the base flame
+// color (deeper red) and a bit darker.
+uint16_t wallColor(uint16_t base) {
+  int r5 = (base >> 11) & 0x1F;
+  int g6 = (base >> 5) & 0x3F;
+  int wallR = (int)(r5 * 0.8f);
+  int wallG = (int)(g6 * 0.35f);
+  return ((uint16_t)wallR << 11) | ((uint16_t)wallG << 5);
+}
+
+// The wall band's outer face color, right at the true cut edge - notably
+// darker still than wallColor, like the pumpkin's own skin barely
+// catching any light at all at that grazing angle.
+uint16_t edgeColor(uint16_t base) {
+  int r5 = (base >> 11) & 0x1F;
+  int g6 = (base >> 5) & 0x3F;
+  int edgeR = (int)(r5 * 0.4f);
+  int edgeG = (int)(g6 * 0.1f);
+  return ((uint16_t)edgeR << 11) | ((uint16_t)edgeG << 5);
+}
+
+// Saturates a raw pixel distance into a 0..1 blend amount: 0 at dist=0,
+// 1 once dist reaches span. Shared by both the wall band's own
+// edge->wall fade and the interior's wall->hot fade, just with a
+// different dist/span each time.
+float saturateOverSpan(float dist, float span) {
+  if (span < 1.0f) {
+    span = 1.0f;
+  }
+  float t = dist / span;
   if (t < 0.0f) {
     t = 0.0f;
   } else if (t > 1.0f) {
     t = 1.0f;
   }
-  return kShadeMinScale + (1.0f - kShadeMinScale) * t;
+  return t;
 }
 
 int16_t smileArcY(int16_t cornerY, int16_t depth, int16_t x, int16_t leftX,
@@ -105,18 +143,12 @@ void fillTriangleInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
   }
 }
 
-// Same shape-fill as fillTriangleInBuffer, but shaded for a 3D-carved
-// look: each row is scaled by verticalShadeScale() instead of filled with
-// one flat color, and a kRimWidthPx-wide band along the triangle's own
-// edges is additionally forced to kRimScale regardless of that gradient
-// (see kRimScale's comment). shadeTopY/shadeBottomY are in the same
-// coordinate space as the triangle's own points (i.e. buffer-local, not
-// absolute screen coordinates - the caller shifts both by the same
-// origin).
+// Same shape-fill as fillTriangleInBuffer, but with a visible wall band
+// plus glowing interior (see kWallWidthPx's comment) instead of one flat
+// color.
 void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
                                 int16_t x0, int16_t y0, int16_t x1, int16_t y1,
-                                int16_t x2, int16_t y2, uint16_t color,
-                                int16_t shadeTopY, int16_t shadeBottomY) {
+                                int16_t x2, int16_t y2, uint16_t color) {
   int16_t minX = x0 < x1 ? (x0 < x2 ? x0 : x2) : (x1 < x2 ? x1 : x2);
   int16_t maxX = x0 > x1 ? (x0 > x2 ? x0 : x2) : (x1 > x2 ? x1 : x2);
   int16_t minY = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
@@ -129,30 +161,52 @@ void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
   // w0/w1/w2 below are each edge's cross product evaluated at (x, y),
   // i.e. (signed distance from that edge line) * (that edge's length) -
   // dividing by each edge's own length converts it into an actual
-  // perpendicular pixel distance, for the rim-width comparison.
+  // perpendicular pixel distance from that edge.
   float len01 = sqrtf((float)(x1 - x0) * (x1 - x0) + (float)(y1 - y0) * (y1 - y0));
   float len12 = sqrtf((float)(x2 - x1) * (x2 - x1) + (float)(y2 - y1) * (y2 - y1));
   float len20 = sqrtf((float)(x0 - x2) * (x0 - x2) + (float)(y0 - y2) * (y0 - y2));
   if (len01 < 1.0f) len01 = 1.0f;
   if (len12 < 1.0f) len12 = 1.0f;
   if (len20 < 1.0f) len20 = 1.0f;
-  uint16_t rimColor = scaleColor(color, kRimScale);
+
+  // Inradius = area / semiperimeter - the maximum possible "distance from
+  // the nearest edge" for this triangle, reached only at its incenter.
+  float area = 0.5f * fabsf((float)(x1 - x0) * (y2 - y0) -
+                           (float)(y1 - y0) * (x2 - x0));
+  float semiperimeter = (len01 + len12 + len20) * 0.5f;
+  float inradius = semiperimeter > 0.0f ? area / semiperimeter : 1.0f;
+  float remainingInradius = inradius - kWallWidthPx;
+  if (remainingInradius < 1.0f) {
+    remainingInradius = 1.0f;
+  }
+
+  uint16_t hot = hotColor(color);
+  uint16_t wall = wallColor(color);
+  uint16_t edge = edgeColor(color);
 
   for (int16_t y = minY; y <= maxY; y++) {
-    // Same interior color for the whole row, so compute it once rather
-    // than once per pixel.
-    uint16_t shaded =
-        scaleColor(color, verticalShadeScale(y, shadeTopY, shadeBottomY));
     for (int16_t x = minX; x <= maxX; x++) {
       int32_t w0 = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0);
       int32_t w1 = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1);
       int32_t w2 = (x0 - x2) * (y - y2) - (y0 - y2) * (x - x2);
       if ((w0 >= 0 && w1 >= 0 && w2 >= 0) ||
           (w0 <= 0 && w1 <= 0 && w2 <= 0)) {
-        bool isRim = fabsf((float)w0) / len01 <= kRimWidthPx ||
-                    fabsf((float)w1) / len12 <= kRimWidthPx ||
-                    fabsf((float)w2) / len20 <= kRimWidthPx;
-        buffer[y * bufW + x] = isRim ? rimColor : shaded;
+        float dist0 = fabsf((float)w0) / len01;
+        float dist1 = fabsf((float)w1) / len12;
+        float dist2 = fabsf((float)w2) / len20;
+        float minDist = dist0 < dist1 ? (dist0 < dist2 ? dist0 : dist2)
+                                       : (dist1 < dist2 ? dist1 : dist2);
+        uint16_t pixelColor;
+        if (minDist < kWallWidthPx) {
+          pixelColor = blendColor(edge, wall,
+                                  saturateOverSpan(minDist, kWallWidthPx));
+        } else {
+          pixelColor = blendColor(
+              wall, hot,
+              saturateOverSpan(minDist - kWallWidthPx,
+                               remainingInradius * kInnerGlowBandFraction));
+        }
+        buffer[y * bufW + x] = pixelColor;
       }
     }
   }
@@ -189,13 +243,12 @@ void fillTangentToothInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
                        RGB565_BLACK);
 }
 
-// Draws one graded (see verticalShadeScale) triangle to the panel, via the
-// same "compose in RAM, blit once" approach the mouth already uses -
+// Draws one walled/glowing (see kWallWidthPx) triangle to the panel, via
+// the same "compose in RAM, blit once" approach the mouth already uses -
 // reuses one static buffer sized for a single small feature (an eye or
 // the nose), since only one of these is ever being composed at a time.
 void drawGradedTriangle(Arduino_GFX *gfx, int16_t x0, int16_t y0, int16_t x1,
-                        int16_t y1, int16_t x2, int16_t y2, uint16_t color,
-                        int16_t shadeTopY, int16_t shadeBottomY) {
+                        int16_t y1, int16_t x2, int16_t y2, uint16_t color) {
   int16_t minX = x0 < x1 ? (x0 < x2 ? x0 : x2) : (x1 < x2 ? x1 : x2);
   int16_t maxX = x0 > x1 ? (x0 > x2 ? x0 : x2) : (x1 > x2 ? x1 : x2);
   int16_t minY = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
@@ -208,8 +261,7 @@ void drawGradedTriangle(Arduino_GFX *gfx, int16_t x0, int16_t y0, int16_t x1,
     featureBuffer[i] = RGB565_BLACK;
   }
   fillTriangleGradedInBuffer(featureBuffer, bufW, bufH, x0 - minX, y0 - minY,
-                            x1 - minX, y1 - minY, x2 - minX, y2 - minY, color,
-                            shadeTopY - minY, shadeBottomY - minY);
+                            x1 - minX, y1 - minY, x2 - minX, y2 - minY, color);
   gfx->draw16bitRGBBitmap(minX, minY, featureBuffer, bufW, bufH);
 }
 
@@ -239,24 +291,15 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
   int16_t mouthUpperDepth = h * 0.10;
   int16_t mouthLowerDepth = h * 0.24;
 
-  // One shared light source for every carved opening (see
-  // verticalShadeScale's comment) - spans from the eyes' own top down to
-  // the mouth's own bottom, so the whole face reads as lit from one place
-  // rather than each feature getting its own independent gradient.
-  int16_t shadeTopY = eyeY - eyeSize;
-  int16_t shadeBottomY = mouthY + mouthLowerDepth;
-
   drawGradedTriangle(gfx, w / 2 - eyeOffsetX, eyeY - eyeSize,
                      w / 2 - eyeOffsetX - eyeSize, eyeY + eyeSize,
-                     w / 2 - eyeOffsetX + eyeSize, eyeY + eyeSize, faceColor,
-                     shadeTopY, shadeBottomY);
+                     w / 2 - eyeOffsetX + eyeSize, eyeY + eyeSize, faceColor);
   drawGradedTriangle(gfx, w / 2 + eyeOffsetX, eyeY - eyeSize,
                      w / 2 + eyeOffsetX - eyeSize, eyeY + eyeSize,
-                     w / 2 + eyeOffsetX + eyeSize, eyeY + eyeSize, faceColor,
-                     shadeTopY, shadeBottomY);
+                     w / 2 + eyeOffsetX + eyeSize, eyeY + eyeSize, faceColor);
   drawGradedTriangle(gfx, w / 2, noseY - noseSize, w / 2 - noseSize,
                      noseY + noseSize, w / 2 + noseSize, noseY + noseSize,
-                     faceColor, shadeTopY, shadeBottomY);
+                     faceColor);
 
   // The mouth arc and teeth are composed into this buffer and blitted to
   // the panel in one shot (see fillTriangleInBuffer above for why).
@@ -268,18 +311,9 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
     mouthBuffer[i] = RGB565_BLACK;
   }
 
-  // Same color for every pixel in a given row regardless of column, so
-  // computed once per row up front rather than once per pixel (see
-  // verticalShadeScale's comment for what this is doing).
-  static uint16_t mouthRowColor[kMouthBufferHeight];
-  for (int16_t row = 0; row < mouthHeight; row++) {
-    mouthRowColor[row] = scaleColor(
-        faceColor, verticalShadeScale(mouthY + row, shadeTopY, shadeBottomY));
-  }
-
-  // Same rim-highlight idea as fillTriangleGradedInBuffer, along the
-  // mouth's own upper/lower arcs rather than straight edges.
-  uint16_t mouthRimColor = scaleColor(faceColor, kRimScale);
+  uint16_t mouthHot = hotColor(faceColor);
+  uint16_t mouthWall = wallColor(faceColor);
+  uint16_t mouthEdge = edgeColor(faceColor);
 
   for (int16_t x = mouthLeft; x <= mouthRight; x++) {
     int16_t upperY = smileArcY(mouthY, mouthUpperDepth, x, mouthLeft,
@@ -287,12 +321,32 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
     int16_t lowerY = smileArcY(mouthY, mouthLowerDepth, x, mouthLeft,
                                mouthRight);
     int16_t col = x - mouthLeft;
+    // Local cavity half-thickness at this column, for the interior glow's
+    // own remaining span beyond the wall band - the mouth's cross-section
+    // varies with x (it's arc-bounded, not a straight-edged shape like the
+    // eyes/nose), so this can't be computed once for the whole shape.
+    float halfThickness = (lowerY - upperY) * 0.5f;
+    float remainingHalfThickness = halfThickness - kWallWidthPx;
+    if (remainingHalfThickness < 1.0f) {
+      remainingHalfThickness = 1.0f;
+    }
     for (int16_t y = upperY; y <= lowerY; y++) {
       int16_t row = y - mouthY;
       if (row >= 0 && row < mouthHeight) {
-        bool isRim = (y - upperY) <= kRimWidthPx || (lowerY - y) <= kRimWidthPx;
-        mouthBuffer[row * mouthWidth + col] =
-            isRim ? mouthRimColor : mouthRowColor[row];
+        float distFromEdge = (float)(y - upperY) < (float)(lowerY - y)
+                                  ? (float)(y - upperY)
+                                  : (float)(lowerY - y);
+        uint16_t pixelColor;
+        if (distFromEdge < kWallWidthPx) {
+          pixelColor = blendColor(
+              mouthEdge, mouthWall, saturateOverSpan(distFromEdge, kWallWidthPx));
+        } else {
+          pixelColor = blendColor(
+              mouthWall, mouthHot,
+              saturateOverSpan(distFromEdge - kWallWidthPx,
+                               remainingHalfThickness * kInnerGlowBandFraction));
+        }
+        mouthBuffer[row * mouthWidth + col] = pixelColor;
       }
     }
   }

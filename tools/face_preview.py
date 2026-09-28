@@ -1,10 +1,10 @@
 """Desktop preview of the current 220x176 TriangleFace firmware face.
 
 Renders with numpy/Pillow rather than Tkinter's own vector shapes, since
-this needs to reproduce the firmware's actual per-pixel vertical shading
-gradient (see verticalShadeScale() in
-firmware/src/faces/triangle_face.cpp) - a plain flat-color polygon fill,
-which is all Tkinter's canvas can do on its own, can't show that.
+this needs to reproduce the firmware's actual per-pixel radial glow (see
+kGlowBandFraction's comment in firmware/src/faces/triangle_face.cpp) - a
+plain flat-color polygon fill, which is all Tkinter's canvas can do on its
+own, can't show that.
 """
 
 import math
@@ -18,24 +18,40 @@ WIDTH = 220
 HEIGHT = 176
 SCALE = 3
 PI = math.pi
-SHADE_MIN_SCALE = 0.45  # see verticalShadeScale()'s comment in the firmware
+GLOW_BAND_FRACTION = 0.4  # see kGlowBandFraction's comment in the firmware
 
 
-def scale_color(rgb, scale):
-    scale = max(0.0, min(1.0, scale))
-    r, g, b = rgb
-    return (int(r * scale + 0.5), int(g * scale + 0.5), int(b * scale + 0.5))
-
-
-def vertical_shade_scale(y, top_y, bottom_y):
-    span = max(1.0, bottom_y - top_y)
-    t = (y - top_y) / span
+def blend_color(a, b, t):
     t = max(0.0, min(1.0, t))
-    return SHADE_MIN_SCALE + (1.0 - SHADE_MIN_SCALE) * t
+    return tuple(int(a[i] + (b[i] - a[i]) * t + 0.5) for i in range(3))
 
 
-def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color, shade_top, shade_bottom):
-    """Same barycentric fill + per-row shading as
+def hot_color(base):
+    """The hot core color a carved opening's interior glows toward - see
+    hotColor() in the firmware."""
+    r, g, _ = base
+    r5 = r >> 3
+    g6 = g >> 2
+    hot_g6 = min(63, g6 + (63 - g6) * 3 // 5)
+    return (r5 << 3, hot_g6 << 2, 6 << 3)
+
+
+def cool_color(base):
+    """The cooler red-orange a carved opening's cut edge fades to - see
+    coolColor() in the firmware."""
+    r, g, _ = base
+    r5 = r >> 3
+    g6 = g >> 2
+    return (int(r5 * 0.8) << 3, int(g6 * 0.35) << 2, 0)
+
+
+def glow_amount(dist, inradius):
+    inradius = max(1.0, inradius)
+    return max(0.0, min(1.0, dist / (inradius * GLOW_BAND_FRACTION)))
+
+
+def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color):
+    """Same barycentric fill + per-pixel edge-distance glow as
     fillTriangleGradedInBuffer() in the firmware, vectorized across each
     row's columns (rather than a fully per-pixel Python loop) since this
     runs every frame at interactive speed."""
@@ -46,6 +62,16 @@ def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color, shade_top, shade_bo
     if min_x > max_x or min_y > max_y:
         return
 
+    len01 = max(1.0, math.hypot(x1 - x0, y1 - y0))
+    len12 = max(1.0, math.hypot(x2 - x1, y2 - y1))
+    len20 = max(1.0, math.hypot(x0 - x2, y0 - y2))
+    area = 0.5 * abs((x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0))
+    semiperimeter = (len01 + len12 + len20) * 0.5
+    inradius = area / semiperimeter if semiperimeter > 0 else 1.0
+
+    hot = hot_color(color)
+    cool = cool_color(color)
+
     xs = np.arange(min_x, max_x + 1)
     for y in range(min_y, max_y + 1):
         w0 = (x1 - x0) * (y - y0) - (y1 - y0) * (xs - x0)
@@ -54,8 +80,15 @@ def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color, shade_top, shade_bo
         mask = ((w0 >= 0) & (w1 >= 0) & (w2 >= 0)) | ((w0 <= 0) & (w1 <= 0) & (w2 <= 0))
         if not mask.any():
             continue
-        shaded = scale_color(color, vertical_shade_scale(y, shade_top, shade_bottom))
-        img[y, min_x:max_x + 1][mask] = shaded
+        dist0 = np.abs(w0) / len01
+        dist1 = np.abs(w1) / len12
+        dist2 = np.abs(w2) / len20
+        min_dist = np.minimum(np.minimum(dist0, dist1), dist2)
+        glow = np.clip(min_dist / (inradius * GLOW_BAND_FRACTION), 0.0, 1.0)
+        row = img[y, min_x:max_x + 1]
+        for i in range(3):
+            row[..., i] = np.where(
+                mask, (cool[i] + (hot[i] - cool[i]) * glow).astype(np.uint8), row[..., i])
 
 
 def smile_arc_y(corner_y, depth, x, left_x, right_x):
@@ -124,26 +157,24 @@ class FacePreview:
         upper_depth = HEIGHT * 0.10
         lower_depth = HEIGHT * 0.24
 
-        # One shared light source for every carved opening, same as the
-        # firmware - see verticalShadeScale()'s comment there.
-        shade_top = eye_y - eye_size
-        shade_bottom = mouth_y + lower_depth
-
         fill_triangle_graded(
             img, center_x - eye_offset, eye_y - eye_size,
             center_x - eye_offset - eye_size, eye_y + eye_size,
             center_x - eye_offset + eye_size, eye_y + eye_size,
-            face_color, shade_top, shade_bottom)
+            face_color)
         fill_triangle_graded(
             img, center_x + eye_offset, eye_y - eye_size,
             center_x + eye_offset - eye_size, eye_y + eye_size,
             center_x + eye_offset + eye_size, eye_y + eye_size,
-            face_color, shade_top, shade_bottom)
+            face_color)
         fill_triangle_graded(
             img, center_x, nose_y - nose_size,
             center_x - nose_size, nose_y + nose_size,
             center_x + nose_size, nose_y + nose_size,
-            face_color, shade_top, shade_bottom)
+            face_color)
+
+        mouth_hot = hot_color(face_color)
+        mouth_cool = cool_color(face_color)
 
         for x in range(math.floor(mouth_left), math.ceil(mouth_right) + 1):
             upper_y = smile_arc_y(mouth_y, upper_depth, x, mouth_left, mouth_right)
@@ -152,13 +183,12 @@ class FacePreview:
             y1 = min(HEIGHT - 1, math.ceil(lower_y))
             if y0 > y1 or not (0 <= x < WIDTH):
                 continue
+            half_thickness = (lower_y - upper_y) * 0.5
             ys = np.arange(y0, y1 + 1)
-            scales = SHADE_MIN_SCALE + (1.0 - SHADE_MIN_SCALE) * np.clip(
-                (ys - shade_top) / max(1.0, shade_bottom - shade_top), 0.0, 1.0)
+            dist_from_edge = np.minimum(ys - upper_y, lower_y - ys)
+            glow = np.clip(dist_from_edge / max(1.0, half_thickness * GLOW_BAND_FRACTION), 0.0, 1.0)
             col = np.stack([
-                np.clip(face_color[0] * scales + 0.5, 0, 255),
-                np.clip(face_color[1] * scales + 0.5, 0, 255),
-                np.clip(face_color[2] * scales + 0.5, 0, 255),
+                mouth_cool[i] + (mouth_hot[i] - mouth_cool[i]) * glow for i in range(3)
             ], axis=1).astype(np.uint8)
             img[y0:y1 + 1, x] = col
 
