@@ -5,13 +5,13 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x4A4B3108; // "JK" + format version 8
-                                       // (added the Clock face's 12/24-hour
-                                       // format flag)
+constexpr uint32_t kMagic = 0x4A4B3109; // "JK" + format version 9
+                                       // (widened enabledMask to 64 bits so
+                                       // a 33rd+ face fits)
 
 struct StoredPrefs {
   uint32_t magic;
-  uint32_t enabledMask;
+  uint64_t enabledMask;
   uint32_t rotateMs;
   uint32_t brightnessPercent;
   uint32_t randomOrder;
@@ -39,7 +39,9 @@ uint32_t foldBytes(uint32_t sum, const void *data, size_t len) {
 }
 
 uint32_t checksumOf(const StoredPrefs &prefs) {
-  uint32_t sum = prefs.magic ^ prefs.enabledMask ^ prefs.rotateMs ^
+  uint32_t sum = prefs.magic ^
+                (uint32_t)prefs.enabledMask ^
+                (uint32_t)(prefs.enabledMask >> 32) ^ prefs.rotateMs ^
                 prefs.brightnessPercent ^ prefs.randomOrder ^
                 prefs.esp32TxPin ^ prefs.esp32RxPin ^ prefs.holidayMonth ^
                 prefs.holidayDay ^ prefs.textFontIndex ^

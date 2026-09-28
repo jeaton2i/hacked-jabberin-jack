@@ -4,9 +4,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Disabled: on this pumpkin, the display is projected onto a curved
+// surface rather than viewed flat, and a QR code's fine, densely
+// alternating data modules warp/defocus into an unscannable blur there
+// (same root cause as TestPatternFace's "noisy" color bars below - blobby
+// shapes tolerate the curvature fine, small crisp features don't). Flip to
+// 1 to bring it back - e.g. on a bigger/flatter pumpkin - without needing
+// to re-derive any of this; the asset/face code is left in place.
+#define JABBERIN_JACK_ENABLE_QR_FACE 0
+
 #include "assets/image_commodore.h"
+#include "assets/image_esp.h"
 #include "assets/image_eyeball.h"
 #include "assets/image_jack_skellington.h"
+#if JABBERIN_JACK_ENABLE_QR_FACE
+#include "assets/image_qr_github.h"
+#endif
 #include "assets/image_robot.h"
 #include "assets/image_skull.h"
 #include "assets/image_wpi_goat.h"
@@ -110,6 +123,12 @@ StaticImageFace jackSkellingtonFace(image_jack_skellington,
 StaticImageFace skullFace(image_skull, image_skull_width, image_skull_height);
 StaticImageFace commodoreFace(image_commodore, image_commodore_width,
                               image_commodore_height);
+#if JABBERIN_JACK_ENABLE_QR_FACE
+// No candle-lit twin, deliberately: the flicker/warm tint would cut into
+// the black/white contrast a camera needs to actually scan this.
+StaticImageFace qrGithubFace(image_qr_github, image_qr_github_width,
+                             image_qr_github_height);
+#endif
 StaticImageFace wpiGoatFace(image_wpi_goat, image_wpi_goat_width,
                             image_wpi_goat_height);
 StaticImageFace wpiGoatHeadFace(image_wpi_goat_head, image_wpi_goat_head_width,
@@ -143,6 +162,8 @@ CandleLitImageFace skullCandleFace(image_skull, image_skull_width,
 CandleLitImageFace commodoreCandleFace(image_commodore, image_commodore_width,
                                        image_commodore_height,
                                        /*preserveRed=*/false);
+CandleLitImageFace espCandleFace(image_esp, image_esp_width,
+                                 image_esp_height);
 CandleLitImageFace wpiGoatCandleFace(image_wpi_goat, image_wpi_goat_width,
                                      image_wpi_goat_height,
                                      /*preserveRed=*/false);
@@ -157,124 +178,149 @@ CandleLitImageFace eyeballCandleFace(image_eyeball, image_eyeball_width,
 CandleLitEyeLookFace eyeLookCandleFace;
 CandleLitRobotLookFace robotLookCandleFace;
 
-Face *faces[] = {&triangleFace,
-                 &testPatternFace,
-                 &checkerboardFace,
-                 &bullseyeFace,
-                 &pacManFace,
-                 &tropicalFace,
-                 &jackSkellingtonFace,
-                 &skullFace,
-                 &commodoreFace,
-                 &wpiGoatFace,
-                 &wpiGoatHeadFace,
-                 &robotFace,
-                 &eyeballFace,
-                 &eyeLookFace,
-                 &robotLookFace,
-                 &jackSkellingtonCandleFace,
-                 &skullCandleFace,
-                 &commodoreCandleFace,
-                 &wpiGoatCandleFace,
-                 &wpiGoatHeadCandleFace,
-                 &robotCandleFace,
-                 &eyeballCandleFace,
-                 &eyeLookCandleFace,
-                 &robotLookCandleFace,
-                 &happyHalloweenFace,
-                 &booFace,
-                 // Placed here (not next to &triangleFace/&countdownFace's
-                 // own natural spots above) so every other face's
-                 // saved-config bit position stays unchanged - only
-                 // configurableTextFace/statusMessageFace shift, and they
-                 // recompute their own fixed index from kFaceCount so
-                 // that's harmless. Same reasoning each time a face gets
-                 // added from here on.
-                 &triangleFaceAnimated,
-                 &countdownFace,
-                 &clockFace,
-                 &configurableTextFace,
-                 &statusMessageFace};
-const char *faceNames[] = {"TriangleFace",
-                           "TestPatternFace",
-                           "Checkerboard",
-                           "Bullseye",
-                           "PacMan",
-                           "Tropical",
-                           "JackSkellington",
-                           "Skull",
-                           "Commodore",
-                           "WpiGoat",
-                           "WpiGoatHeadOnly",
-                           "Robot",
-                           "Eyeball",
-                           "EyeballLookAround",
-                           "RobotLookAround",
-                           "JackSkellingtonCandleLit",
-                           "SkullCandleLit",
-                           "CommodoreCandleLit",
-                           "WpiGoatCandleLit",
-                           "WpiGoatHeadCandleLit",
-                           "RobotCandleLit",
-                           "EyeballCandleLit",
-                           "EyeballLookAroundCandleLit",
-                           "RobotLookAroundCandleLit",
-                           "HappyHalloweenText",
-                           "BooText",
-                           "TriangleFaceAnimated",
-                           "Countdown",
-                           "Clock",
-                           "ConfigurableText",
-                           "StatusMessage"};
+// Grouped by theme/character rather than insertion order (each theme's
+// plain face immediately followed by its candle-lit twin, where one
+// exists) - Tropical doesn't fit any of the named groups, and
+// statusMessageFace is a hidden internal overlay excluded from the web
+// UI's own face list regardless of position (see printStatusJson()), so
+// both just sit in an unthemed tail rather than forcing either into a
+// group that doesn't really fit.
+Face *faces[] = {
+    &triangleFace,
+    &triangleFaceAnimated,
+    &testPatternFace,
+    &checkerboardFace,
+    &bullseyeFace,
+    &jackSkellingtonFace,
+    &jackSkellingtonCandleFace,
+    &skullFace,
+    &skullCandleFace,
+    &robotFace,
+    &robotCandleFace,
+    &robotLookFace,
+    &robotLookCandleFace,
+    &eyeballFace,
+    &eyeballCandleFace,
+    &eyeLookFace,
+    &eyeLookCandleFace,
+    &happyHalloweenFace,
+    &booFace,
+    &countdownFace,
+    &clockFace,
+    &configurableTextFace,
+    &pacManFace,
+    &commodoreFace,
+    &commodoreCandleFace,
+    &espCandleFace,
+    &tropicalFace,
+#if JABBERIN_JACK_ENABLE_QR_FACE
+    &qrGithubFace,
+#endif
+    &wpiGoatFace,
+    &wpiGoatCandleFace,
+    &wpiGoatHeadFace,
+    &wpiGoatHeadCandleFace,
+    &statusMessageFace,
+};
+// Display names only - the C++ variable/class names above are internal and
+// untouched. Each non-"other"/status name is prefixed with its theme group
+// (see faces[]'s comment) so the flat list still reads as grouped; "other"
+// is the catch-all for anything that isn't really part of a themed set.
+const char *faceNames[] = {
+    "triangle",
+    "triangleAnimated",
+    "testColorBars",
+    "testCheckboard",
+    "testBullseye",
+    "jack",
+    "jackCandleLit",
+    "skull",
+    "skullCandleLit",
+    "robot",
+    "robotCandleLit",
+    "robotLookAround",
+    "robotLookAroundCandleLit",
+    "eyes",
+    "eyesCandleLit",
+    "eyesLookAround",
+    "eyesLookAroundCandleLit",
+    "textHappyHalloween",
+    "textBoo",
+    "textCountdown",
+    "textClock",
+    "textConfigurable",
+    "otherPacMan",
+    "otherCommodore",
+    "otherCommodoreCandleLit",
+    "otherEspCandleLit",
+    "otherTropical",
+#if JABBERIN_JACK_ENABLE_QR_FACE
+    "otherQrGithub",
+#endif
+    "wpiLogoGoat",
+    "wpiLogoGoatCandleLit",
+    "wpiGoatOnly",
+    "wpiGoatOnlyCandleLit",
+    "StatusMessage",
+};
 constexpr size_t kFaceCount = sizeof(faces) / sizeof(faces[0]);
 // enabledMask packs one bit per face; a wider mask type or a bitset would be
-// needed past 32 faces.
-static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
+// needed past 64 faces.
+static_assert(kFaceCount <= 64, "faceEnabled no longer fits a uint64_t mask");
 // Fixed indices for the faces jumped to directly by index rather than
 // reached through the normal rotation (see the "text"/"font"/"countdown"
-// commands and showStatusMessage).
-constexpr size_t kCountdownFaceIndex = kFaceCount - 4;
-constexpr size_t kClockFaceIndex = kFaceCount - 3;
-constexpr size_t kConfigurableTextFaceIndex = kFaceCount - 2;
+// commands and showStatusMessage). Countdown/Clock/ConfigurableText sit in
+// the middle of the themed order above (with HappyHalloweenText/BooText)
+// rather than at the tail, so - unlike before - these can't self-adjust
+// from kFaceCount; update these three by hand if a face gets inserted
+// before them. statusMessageFace is still deliberately last (see faces[]'s
+// comment), so its index still can self-adjust.
+constexpr size_t kCountdownFaceIndex = 19;
+constexpr size_t kClockFaceIndex = 20;
+constexpr size_t kConfigurableTextFaceIndex = 21;
 constexpr size_t kStatusMessageFaceIndex = kFaceCount - 1;
 
 // Test pattern is noisy right now (see project notes) - off by default,
 // but stays in the rotation/menu so it's a one-command toggle to check.
 const bool kDefaultFaceEnabled[kFaceCount] = {
     true,  // TriangleFace
+    false, // TriangleFaceAnimated - opt-in, so the mouth doesn't suddenly
+           // start flapping in rotation until asked for
     false, // TestPatternFace
     false, // Checkerboard
     false, // Bullseye
-    true,  // PacMan
-    false, // Tropical
     false, // JackSkellington
-    true,  // Skull
-    false, // Commodore
-    true,  // WpiGoat
-    false, // WpiGoatHeadOnly
-    false, // Robot
-    false, // Eyeball
-    true,  // EyeballLookAround
-    true,  // RobotLookAround
     true,  // JackSkellingtonCandleLit
+    true,  // Skull
     false, // SkullCandleLit
-    false, // CommodoreCandleLit
-    false, // WpiGoatCandleLit
-    true,  // WpiGoatHeadCandleLit
+    false, // Robot
     false, // RobotCandleLit
-    false, // EyeballCandleLit
-    true,  // EyeballLookAroundCandleLit
+    true,  // RobotLookAround
     true,  // RobotLookAroundCandleLit
-    true, // HappyHalloweenText
-    true, // BooText
-    false, // TriangleFaceAnimated - opt-in, so the mouth doesn't suddenly
-           // start flapping in rotation until asked for
+    false, // Eyeball
+    false, // EyeballCandleLit
+    true,  // EyeballLookAround
+    true,  // EyeballLookAroundCandleLit
+    true,  // HappyHalloweenText
+    true,  // BooText
     false, // Countdown - opt-in, and useless in rotation until the ESP32
            // bridge has actually synced a date at least once anyway
     false, // Clock - opt-in, same reasoning as Countdown (useless until
            // the ESP32 bridge has synced a time at least once)
-    true, // ConfigurableText
-    false // StatusMessage
+    true,  // ConfigurableText
+    true,  // PacMan
+    false, // Commodore
+    false, // CommodoreCandleLit
+    true,  // EspCandleLit
+    false, // Tropical
+#if JABBERIN_JACK_ENABLE_QR_FACE
+    false, // QrGithub - opt-in, novelty face
+#endif
+    true,  // WpiGoat
+    false, // WpiGoatCandleLit
+    false, // WpiGoatHeadOnly
+    true,  // WpiGoatHeadCandleLit
+    false, // StatusMessage
   };
 bool faceEnabled[kFaceCount];
 
@@ -396,19 +442,19 @@ SerialPort espPort{&Serial2};
 // UART1 instead of USB.
 Stream *cmdOut = &Serial;
 
-uint32_t currentEnabledMask() {
-  uint32_t mask = 0;
+uint64_t currentEnabledMask() {
+  uint64_t mask = 0;
   for (size_t i = 0; i < kFaceCount; i++) {
     if (faceEnabled[i]) {
-      mask |= (1UL << i);
+      mask |= (1ULL << i);
     }
   }
   return mask;
 }
 
-void applyEnabledMask(uint32_t mask) {
+void applyEnabledMask(uint64_t mask) {
   for (size_t i = 0; i < kFaceCount; i++) {
-    faceEnabled[i] = (mask & (1UL << i)) != 0;
+    faceEnabled[i] = (mask & (1ULL << i)) != 0;
   }
 }
 

@@ -28,7 +28,8 @@ constexpr size_t kPrefsTextLineCount = 4;
 // RP2040 can't know today's date on its own), so persisting it would just
 // mean booting up believing a stale, possibly very wrong "today".
 struct Prefs {
-  uint32_t enabledMask;
+  uint64_t enabledMask; // one bit per face - see main.cpp's kFaceCount
+                       // static_assert for the ceiling this implies
   uint32_t rotateMs;
   uint32_t brightnessPercent; // CandleFlicker::brightness() * 100
   uint32_t randomOrder;      // 0 = in-order, 1 = random
