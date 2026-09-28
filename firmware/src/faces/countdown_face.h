@@ -17,7 +17,7 @@
 // just shows a placeholder explaining that instead of a countdown.
 class CountdownFace : public Face {
 public:
-  static constexpr size_t kMaxHolidayNameLength = 24;
+  static constexpr size_t kMaxHolidayNameLength = 48;
 
   CountdownFace();
 
@@ -32,6 +32,11 @@ public:
   // range (see main.cpp's "countdown" command) - an invalid combination
   // (e.g. Feb 30) just resolves to *some* date via daysFromCivil's math
   // instead of being rejected outright.
+  //
+  // name may contain one '|' to split it across two lines (e.g.
+  // "Connie's|Birthday") instead of forcing it onto one, the same
+  // convention main.cpp's "text" command uses for ConfigurableText - see
+  // refreshText().
   void setHoliday(const char *name, uint8_t month, uint8_t day);
 
   // Feeds in the actual current calendar date, as reported by the ESP32

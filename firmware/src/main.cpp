@@ -645,7 +645,7 @@ void printHelp() {
   cmdOut->println("  brightness [percent] - show/set candle brightness (100=original)");
   cmdOut->println("  order [random|in-order] - show/set face advance order");
   cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
-  cmdOut->println("  countdown [<month> <day> <name>] - show, or set, the Countdown face's target date/holiday name");
+  cmdOut->println("  countdown [<month> <day> <name>] - show, or set, the Countdown face's target date/holiday name (name may contain one '|' to split it across 2 lines)");
   cmdOut->println("  settime <year> <month> <day> - feed today's actual date to the Countdown face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  audio <tone|voice> - play the synthesized test tone, or the test speech clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
@@ -865,7 +865,8 @@ void handleSerialCommand(const char *line) {
     const char *name = (end == dayArg) ? end : skipSpaces(end);
     if (end == dayArg || name[0] == '\0' || month < 1 || month > 12 ||
         day < 1 || day > 31) {
-      cmdOut->println("Usage: countdown <month> <day> <holiday name>");
+      cmdOut->println("Usage: countdown <month> <day> <holiday name> "
+                      "(name may contain one '|' to split it across 2 lines)");
       return;
     }
     countdownFace.setHoliday(name, (uint8_t)month, (uint8_t)day);

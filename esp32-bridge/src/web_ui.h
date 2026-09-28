@@ -211,6 +211,8 @@ static const char INDEX_HTML[] = R"HTML(
     <div id="countdownReadout" style="margin-bottom:10px;">&mdash;</div>
     <label for="countdownName">Holiday name</label>
     <input type="text" id="countdownName" maxlength="23">
+    <label for="countdownName2">Holiday name, line 2 (optional)</label>
+    <input type="text" id="countdownName2" maxlength="23">
     <div class="row">
       <div>
         <label for="countdownMonth">Month</label>
@@ -436,21 +438,29 @@ function applyStatus(status) {
   if (!isEditing(jackRxPin)) { jackRxPin.value = status.esp32RxPin; }
 
   var countdown = status.countdown || {};
+  // holidayName may itself contain a '|' splitting it across 2 lines (see
+  // the RP2040's "countdown" command) - split back apart for the two
+  // separate input fields, and join with a space for the plain-text
+  // readout below.
+  var nameParts = (countdown.holidayName || "").split("|");
+  var holidayDisplayName = nameParts.join(" ");
   var countdownName = document.getElementById("countdownName");
+  var countdownName2 = document.getElementById("countdownName2");
   var countdownMonth = document.getElementById("countdownMonth");
   var countdownDay = document.getElementById("countdownDay");
-  if (!isEditing(countdownName)) { countdownName.value = countdown.holidayName || ""; }
+  if (!isEditing(countdownName)) { countdownName.value = nameParts[0] || ""; }
+  if (!isEditing(countdownName2)) { countdownName2.value = nameParts[1] || ""; }
   if (!isEditing(countdownMonth)) { countdownMonth.value = countdown.holidayMonth || ""; }
   if (!isEditing(countdownDay)) { countdownDay.value = countdown.holidayDay || ""; }
   var countdownReadout = document.getElementById("countdownReadout");
   if (!countdown.synced) {
     countdownReadout.textContent = "Not synced yet - waiting on this board's NTP sync";
   } else if (countdown.daysUntil === 0) {
-    countdownReadout.textContent = "Today is " + countdown.holidayName + "!";
+    countdownReadout.textContent = "Today is " + holidayDisplayName + "!";
   } else if (countdown.daysUntil === 1) {
-    countdownReadout.textContent = "Tomorrow is " + countdown.holidayName + "!";
+    countdownReadout.textContent = "Tomorrow is " + holidayDisplayName + "!";
   } else {
-    countdownReadout.textContent = countdown.daysUntil + " days until " + countdown.holidayName;
+    countdownReadout.textContent = countdown.daysUntil + " days until " + holidayDisplayName;
   }
 }
 
@@ -513,11 +523,13 @@ document.getElementById("countdownApplyBtn").addEventListener("click", function 
   var month = parseInt(document.getElementById("countdownMonth").value, 10);
   var day = parseInt(document.getElementById("countdownDay").value, 10);
   var name = document.getElementById("countdownName").value.trim();
+  var name2 = document.getElementById("countdownName2").value.trim();
   if (!name || !month || !day) {
     alert("Holiday name, month, and day are all required.");
     return;
   }
-  sendCommand("countdown " + month + " " + day + " " + name).then(refreshStatus);
+  var fullName = name2 ? (name + "|" + name2) : name;
+  sendCommand("countdown " + month + " " + day + " " + fullName).then(refreshStatus);
 });
 
 document.getElementById("debugLogging").addEventListener("change", function () {

@@ -143,7 +143,7 @@ command list; send `help` any time to see it again.
 | `audio <tone\|voice>` | Play the synthesized test tone, or the test speech clip, over this board's own optional I2S audio output - see `docs/audio-i2s-wiring.md` |
 | `audio <esp-tone\|esp-voice>` | Queue the same to instead play on the optional ESP32 bridge's own speaker (it polls for this - see `audiotrigger`) |
 | `audiotrigger` | Read + clear the pending ESP32 audio queue - polled by the ESP32 bridge, not really meant for humans |
-| `countdown [<month> <day> <name>]` | Show, or set, the `Countdown` face's target date/holiday name (defaults to Halloween, `10 31`) |
+| `countdown [<month> <day> <name>]` | Show, or set, the `Countdown` face's target date/holiday name (defaults to Halloween, `10 31`) - `name` may contain one `\|` to split it across 2 lines, e.g. `countdown 6 14 Connie's\|Birthday` |
 | `settime <year> <month> <day>` | Feed today's actual date to the `Countdown` face - the RP2040 has no clock of its own, so this is meant to be sent periodically by the ESP32 bridge once it has real time over NTP (see `docs/esp32-network-bridge.md`); nothing stops sending it by hand too |
 | `save`        | Persist the current face selection + rotate interval + brightness + order + ESP32 link pins + countdown holiday to flash |
 | `load`        | Reload the saved config from flash                          |

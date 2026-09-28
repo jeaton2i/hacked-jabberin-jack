@@ -70,9 +70,25 @@ void CountdownFace::setSyncedDate(uint16_t year, uint8_t month, uint8_t day) {
 }
 
 void CountdownFace::refreshText() {
+  // Splits the holiday name on '|' (see setHoliday()'s comment) into up to
+  // two lines - nameLine2 stays null for a plain single-line name.
+  // TextFace::setText() drops null/empty args wherever they fall (not
+  // just trailing ones), so passing a null nameLine2 below just leaves
+  // this rendered as one line, no special-casing needed here.
+  char nameBuf[kMaxHolidayNameLength];
+  strncpy(nameBuf, _holidayName, sizeof(nameBuf) - 1);
+  nameBuf[sizeof(nameBuf) - 1] = '\0';
+  const char *nameLine1 = nameBuf;
+  const char *nameLine2 = nullptr;
+  char *pipe = strchr(nameBuf, '|');
+  if (pipe) {
+    *pipe = '\0';
+    nameLine2 = pipe + 1;
+  }
+
   if (!_synced) {
-    _textFace.setText(_holidayName, "Sync required", "(needs the ESP32",
-                      "bridge - see docs)");
+    _textFace.setText("Sync required", nameLine1, nameLine2,
+                      "(needs ESP32 bridge)");
     return;
   }
 
@@ -84,17 +100,13 @@ void CountdownFace::refreshText() {
   }
   _lastDisplayedDays = days;
 
-  char line2[TextFace::kMaxLineLength];
-  strncpy(line2, _holidayName, sizeof(line2) - 1);
-  line2[sizeof(line2) - 1] = '\0';
-
   if (days <= 0) {
-    _textFace.setText("Today is", line2);
+    _textFace.setText("Today is", nameLine1, nameLine2);
   } else if (days == 1) {
-    _textFace.setText("Tomorrow is", line2);
+    _textFace.setText("Tomorrow is", nameLine1, nameLine2);
   } else {
     char line1[24];
     snprintf(line1, sizeof(line1), "%ld days until", (long)days);
-    _textFace.setText(line1, line2);
+    _textFace.setText(line1, nameLine1, nameLine2);
   }
 }

@@ -6,7 +6,7 @@
 // Matches CountdownFace::kMaxHolidayNameLength - duplicated as a plain
 // constant rather than including countdown_face.h here, so this low-level
 // storage struct doesn't need to depend on a specific face's header.
-constexpr size_t kPrefsHolidayNameLength = 24;
+constexpr size_t kPrefsHolidayNameLength = 48;
 
 // Persisted configuration: which faces are enabled, the auto-rotate
 // interval, the candle brightness scale, the face advance order, the

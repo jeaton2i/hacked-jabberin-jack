@@ -5,7 +5,9 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x4A4B3105; // "JK" + format version 5
+constexpr uint32_t kMagic = 0x4A4B3106; // "JK" + format version 6 (holidayName
+                                       // grew to fit a 2-line "Connie's|
+                                       // Birthday"-style name)
 
 struct StoredPrefs {
   uint32_t magic;
