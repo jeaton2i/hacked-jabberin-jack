@@ -10,10 +10,13 @@ Based on the work from pburgess:
 
 ## Parts List
 
-- [Jabberin' Jack XL](https://www.amazon.com/dp/B0H2K4M1ZR)
-- [Jabberin' Jack XL (white)](https://www.amazon.com/dp/B0H2K7R6RT)
+- [Jabberin' Jack](https://www.amazon.com/dp/B0CD2Z9DGP)
+- [Jabberin' Jack XL](https://www.amazon.com/dp/B0H2K4M1ZR) (note: I haven't gotten this version working yet)
+- [Jabberin' Jack XL (white)](https://www.amazon.com/dp/B0H2K7R6RT) note: I haven't gotten this version working yet)
 - [Generic Raspberry Pi Pico clone](https://www.amazon.com/dp/B0CG9FWDDC)
 - [Adaptor for projector ribbon cable](https://www.amazon.com/dp/B09VPHWM26)
+- Optional [MAX98357 for audio](https://www.amazon.com/dp/B0B4GK5R1R) (in progress)
+- Optional generic esp32 to make it networked (works, but needs its own power supply, the pumpkin's usb port doesn't provide enough for the projector light and the esp32 with wifi)
 
 ## References
 
@@ -38,14 +41,18 @@ Based on the work from pburgess:
     audio - `TriangleFace` (the plain, non-animated face) is unchanged and
     still registered separately
   - Moving eyes/nose
-- Special effects/overlays
+- Special effects/overlays (not yet done)
   - Blood dripping
   - Fading away
   - Color changing illumination
 - Alternative face styles
   - Jack Skellington
-  - Skull Face / Reaper
+  - Skull Face
   - Robot
+- Alternative Displays
+  - Text
+  - Eyeball
+  - Other fun things
 
 ## Stretch Goals
 
