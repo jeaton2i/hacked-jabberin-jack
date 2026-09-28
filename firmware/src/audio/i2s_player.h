@@ -21,6 +21,16 @@ namespace I2sPlayer {
 // forgiving of the same mistake, so this firmware just doesn't try it.
 void begin();
 
+// Software volume scale applied to every sample this plays (the test
+// tone and any clip), independent of the MAX98357A's own fixed hardware
+// GAIN pin strapping (see docs/audio-i2s-wiring.md) - that's a solder-pad
+// choice made once at build time, not something re-adjustable at runtime.
+// 1.0 (the default) passes samples through unscaled; clamped to [0, 1] -
+// values above 1 would clip instead of getting louder, since clips and
+// the test tone are already authored with headroom assuming unity gain.
+void setVolume(float volume);
+float volume();
+
 // Plays a short two-note test chime, synthesized on the fly - no audio
 // asset needed, just proves the DAC/amp/speaker chain works at all.
 void playTestTone();

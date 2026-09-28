@@ -13,6 +13,7 @@
 // to re-derive any of this; the asset/face code is left in place.
 #define JABBERIN_JACK_ENABLE_QR_FACE 0
 
+#include "assets/audio_pacman.h"
 #include "assets/image_commodore.h"
 #include "assets/image_esp.h"
 #include "assets/image_eyeball.h"
@@ -97,6 +98,7 @@ constexpr int8_t PIN_LED_DATA = 15;
 constexpr uint16_t kLedCount = 12;
 constexpr unsigned long kDefaultAutoRotateMs = 6000;
 constexpr unsigned long kDefaultBrightnessPercent = 115;
+constexpr unsigned long kDefaultVolumePercent = 100;
 } // namespace
 
 Display display;
@@ -497,6 +499,7 @@ Prefs buildCurrentPrefs() {
   }
   prefs.textFontIndex = (uint32_t)currentFontIndex;
   prefs.clockUse12Hour = clockFace.use12Hour() ? 1 : 0;
+  prefs.volumePercent = (uint32_t)(I2sPlayer::volume() * 100.0f);
   return prefs;
 }
 
@@ -555,6 +558,7 @@ void resetToDefaults() {
   esp32TxPin = kDefaultPinEsp32Tx;
   esp32RxPin = kDefaultPinEsp32Rx;
   CandleFlicker::setBrightness(kDefaultBrightnessPercent / 100.0f);
+  I2sPlayer::setVolume(kDefaultVolumePercent / 100.0f);
   countdownFace.setHoliday("Halloween", 10, 31);
   currentFontIndex = 0;
   configurableTextFace.setText("Set my text!");
@@ -720,6 +724,8 @@ void printStatusJson() {
   cmdOut->print(autoRotateMs);
   cmdOut->print(",\"brightnessPercent\":");
   cmdOut->print((int)(CandleFlicker::brightness() * 100.0f + 0.5f));
+  cmdOut->print(",\"volumePercent\":");
+  cmdOut->print((int)(I2sPlayer::volume() * 100.0f + 0.5f));
   cmdOut->print(",\"order\":\"");
   cmdOut->print(randomOrder ? "random" : "in-order");
   cmdOut->print("\",\"font\":\"");
@@ -801,6 +807,7 @@ void printHelp() {
   cmdOut->println("  font [name] - list/set ConfigurableText's font (see 'font' with no name)");
   cmdOut->println("  rotate <ms> - set auto-rotate interval (0 disables)");
   cmdOut->println("  brightness [percent] - show/set candle brightness (100=original)");
+  cmdOut->println("  volume [percent] - show/set audio playback volume for this board's own I2S output (0-100, 100=original)");
   cmdOut->println("  order [random|in-order] - show/set face advance order");
   cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
   cmdOut->println("  countdown [<month> <day> <name>] - show, or set, the Countdown face's target date/holiday name (name may contain one '|' to split it across 2 lines)");
@@ -808,7 +815,7 @@ void printHelp() {
   cmdOut->println("  setclock <hour 0-23> <minute> <second> - feed the current wall-clock time to the Clock face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  clockformat [12|24] - show, or set, whether the Clock face displays 12- or 24-hour time (default 24)");
   cmdOut->println("  eyecolor [blue|red|green|brown] - show, or set, the animated eye faces' iris color (default blue; only affects the plain, not candle-lit, eye faces)");
-  cmdOut->println("  audio <tone|voice> - play the synthesized test tone, or the test speech clip, over this board's own I2S output");
+  cmdOut->println("  audio <tone|voice|pacman> - play the synthesized test tone, the test speech clip, or the Pac-Man power pellet clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
   cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
   cmdOut->println("  save        - save current faces + rotate interval + brightness + order + ESP32 link pins to flash");
@@ -897,7 +904,8 @@ void handleSerialCommand(const char *line) {
   if (strcmp(line, "save") == 0) {
     savePrefs(buildCurrentPrefs());
     cmdOut->println("Saved current faces + rotate interval + brightness + "
-                    "order + ESP32 link pins + countdown holiday to flash");
+                    "volume + order + ESP32 link pins + countdown holiday "
+                    "to flash");
     return;
   }
   if (strcmp(line, "load") == 0) {
@@ -906,6 +914,7 @@ void handleSerialCommand(const char *line) {
       applyEnabledMask(prefs.enabledMask);
       autoRotateMs = prefs.rotateMs;
       CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
+      I2sPlayer::setVolume(prefs.volumePercent / 100.0f);
       randomOrder = prefs.randomOrder != 0;
       countdownFace.setHoliday(prefs.holidayName, (uint8_t)prefs.holidayMonth,
                                (uint8_t)prefs.holidayDay);
@@ -957,6 +966,29 @@ void handleSerialCommand(const char *line) {
       cmdOut->println("%");
     } else {
       cmdOut->println("Usage: brightness <percent>");
+    }
+    return;
+  }
+  if (strncmp(line, "volume", 6) == 0 &&
+      (line[6] == '\0' || line[6] == ' ')) {
+    const char *arg = skipSpaces(line + 6);
+    if (arg[0] == '\0') {
+      cmdOut->print("Volume: ");
+      cmdOut->print((int)(I2sPlayer::volume() * 100.0f + 0.5f));
+      cmdOut->println("%");
+      return;
+    }
+    char *end;
+    long percent = strtol(arg, &end, 10);
+    if (end != arg && *end == '\0' && percent >= 0) {
+      I2sPlayer::setVolume(percent / 100.0f);
+      cmdOut->print("Volume set to ");
+      // setVolume() clamps to 100 - report what it actually landed on
+      // rather than echoing back a request above that.
+      cmdOut->print((int)(I2sPlayer::volume() * 100.0f + 0.5f));
+      cmdOut->println("%");
+    } else {
+      cmdOut->println("Usage: volume <percent>");
     }
     return;
   }
@@ -1166,6 +1198,10 @@ void handleSerialCommand(const char *line) {
     } else if (strcmp(arg, "voice") == 0) {
       I2sPlayer::playClip(test_word, test_word_length, test_word_sample_rate);
       cmdOut->println("Played test voice clip");
+    } else if (strcmp(arg, "pacman") == 0) {
+      I2sPlayer::playClip(audio_pacman, audio_pacman_length,
+                          audio_pacman_sample_rate);
+      cmdOut->println("Played Pac-Man power pellet clip");
     } else if (strcmp(arg, "esp-tone") == 0) {
       pendingEsp32Audio = Esp32AudioTrigger::Tone;
       cmdOut->println("Queued for the ESP32 bridge to play: tone");
@@ -1173,7 +1209,7 @@ void handleSerialCommand(const char *line) {
       pendingEsp32Audio = Esp32AudioTrigger::Voice;
       cmdOut->println("Queued for the ESP32 bridge to play: voice");
     } else {
-      cmdOut->println("Usage: audio <tone|voice|esp-tone|esp-voice>");
+      cmdOut->println("Usage: audio <tone|voice|pacman|esp-tone|esp-voice>");
     }
     return;
   }
@@ -1323,6 +1359,7 @@ void setup() {
     applyEnabledMask(prefs.enabledMask);
     autoRotateMs = prefs.rotateMs;
     CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
+    I2sPlayer::setVolume(prefs.volumePercent / 100.0f);
     randomOrder = prefs.randomOrder != 0;
     countdownFace.setHoliday(prefs.holidayName, (uint8_t)prefs.holidayMonth,
                              (uint8_t)prefs.holidayDay);

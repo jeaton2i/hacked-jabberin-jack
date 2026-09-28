@@ -23,12 +23,14 @@ constexpr int16_t kToneAmplitude = 12000; // headroom below full-scale int16
 
 I2S i2s(OUTPUT, PIN_I2S_BCLK, PIN_I2S_DATA);
 bool began = false;
+float volumeScale = 1.0f;
 
 void playSineTone(float freqHz, unsigned long durationMs) {
   size_t sampleCount = (size_t)(kSampleRate * durationMs / 1000);
   for (size_t i = 0; i < sampleCount; i++) {
     float t = (float)i / (float)kSampleRate;
-    int16_t sample = (int16_t)(kToneAmplitude * sinf(kTwoPi * freqHz * t));
+    int16_t sample =
+        (int16_t)(kToneAmplitude * volumeScale * sinf(kTwoPi * freqHz * t));
     i2s.write16(sample, sample);
   }
 }
@@ -40,6 +42,17 @@ void I2sPlayer::begin() {
     Serial.println("I2S audio init failed - check PIN_I2S_BCLK/DATA wiring");
   }
 }
+
+void I2sPlayer::setVolume(float volume) {
+  if (volume < 0.0f) {
+    volume = 0.0f;
+  } else if (volume > 1.0f) {
+    volume = 1.0f;
+  }
+  volumeScale = volume;
+}
+
+float I2sPlayer::volume() { return volumeScale; }
 
 void I2sPlayer::playTestTone() {
   if (!began) {
@@ -63,6 +76,7 @@ void I2sPlayer::playClip(const int16_t *samples, size_t length,
     return;
   }
   for (size_t i = 0; i < length; i++) {
-    i2s.write16(samples[i], samples[i]);
+    int16_t sample = (int16_t)(samples[i] * volumeScale);
+    i2s.write16(sample, sample);
   }
 }

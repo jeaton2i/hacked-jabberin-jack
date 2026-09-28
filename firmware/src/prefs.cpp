@@ -5,9 +5,8 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x4A4B3109; // "JK" + format version 9
-                                       // (widened enabledMask to 64 bits so
-                                       // a 33rd+ face fits)
+constexpr uint32_t kMagic = 0x4A4B310A; // "JK" + format version 10
+                                       // (added I2sPlayer's volume)
 
 struct StoredPrefs {
   uint32_t magic;
@@ -23,6 +22,7 @@ struct StoredPrefs {
   char textLines[kPrefsTextLineCount][kPrefsTextLineLength];
   uint32_t textFontIndex;
   uint32_t clockUse12Hour;
+  uint32_t volumePercent;
   uint32_t checksum;
 };
 
@@ -45,7 +45,7 @@ uint32_t checksumOf(const StoredPrefs &prefs) {
                 prefs.brightnessPercent ^ prefs.randomOrder ^
                 prefs.esp32TxPin ^ prefs.esp32RxPin ^ prefs.holidayMonth ^
                 prefs.holidayDay ^ prefs.textFontIndex ^
-                prefs.clockUse12Hour;
+                prefs.clockUse12Hour ^ prefs.volumePercent;
   static_assert(kPrefsHolidayNameLength % 4 == 0,
                "holidayName must be a multiple of 4 bytes for this loop");
   static_assert(kPrefsTextLineLength % 4 == 0,
@@ -85,6 +85,7 @@ bool loadPrefs(Prefs &out) {
   }
   out.textFontIndex = stored.textFontIndex;
   out.clockUse12Hour = stored.clockUse12Hour;
+  out.volumePercent = stored.volumePercent;
   return true;
 }
 
@@ -108,6 +109,7 @@ void savePrefs(const Prefs &prefs) {
   }
   stored.textFontIndex = prefs.textFontIndex;
   stored.clockUse12Hour = prefs.clockUse12Hour;
+  stored.volumePercent = prefs.volumePercent;
   stored.checksum = checksumOf(stored);
 
   EEPROM.begin(sizeof(StoredPrefs));

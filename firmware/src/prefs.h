@@ -41,6 +41,7 @@ struct Prefs {
   char textLines[kPrefsTextLineCount][kPrefsTextLineLength];
   uint32_t textFontIndex; // index into main.cpp's kFontOptions
   uint32_t clockUse12Hour; // 0 = 24-hour, 1 = 12-hour - see ClockFace
+  uint32_t volumePercent; // I2sPlayer::volume() * 100
 };
 
 // Loads saved prefs from flash into `out`. Returns false (leaving `out`
