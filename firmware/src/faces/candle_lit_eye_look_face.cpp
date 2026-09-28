@@ -38,7 +38,13 @@ void CandleLitEyeLookFace::draw(Arduino_GFX *gfx) {
       for (int16_t x = 0; x < kPanelWidth; x++) {
         uint16_t raw;
         if (rowInBox && x >= boxX0 && x <= boxX1) {
-          raw = _motion.sample(x, y);
+          // Always the native art color here regardless of the plain eye
+          // face's current selection (see EyeLookMotion::sample()'s
+          // comment) - the flicker tint folds this to monochrome
+          // orange/yellow either way, so there's nothing to gain from
+          // recoloring first, and doing so risked a wrong-looking
+          // "preserveRed" special case.
+          raw = _motion.sample(x, y, kEyeColorBlue);
         } else {
           raw = image_eyeball[(int32_t)y * kPanelWidth + x];
         }

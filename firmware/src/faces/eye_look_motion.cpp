@@ -278,7 +278,7 @@ void EyeLookMotion::update() {
   _centerYInt = (int16_t)lroundf(kIrisRestY + _offsetY);
 }
 
-uint16_t EyeLookMotion::sample(int16_t x, int16_t y) const {
+uint16_t EyeLookMotion::sample(int16_t x, int16_t y, EyeColor color) const {
   int16_t dx = x - _centerXInt;
   int16_t dy = y - _centerYInt;
   int32_t distSq = (int32_t)dx * dx + (int32_t)dy * dy;
@@ -299,7 +299,7 @@ uint16_t EyeLookMotion::sample(int16_t x, int16_t y) const {
   int16_t srcX = clampCoord(kIrisRestXInt + dx, kPanelWidth - 1);
   int16_t srcY = clampCoord(kIrisRestYInt + dy, kPanelHeight - 1);
   uint16_t iris = recolorIris(
-      image_eyeball[(int32_t)srcY * kPanelWidth + srcX], s_color);
+      image_eyeball[(int32_t)srcY * kPanelWidth + srcX], color);
   if (distSq <= kInnerSqInt) {
     return iris;
   }

@@ -27,8 +27,15 @@ public:
   void update();
 
   // Raw (untinted) RGB565 color the source eyeball image shows at panel
-  // position (x, y) given the current iris offset.
-  uint16_t sample(int16_t x, int16_t y) const;
+  // position (x, y) given the current iris offset. `color` defaults to
+  // the shared runtime selection (see setColor()) - CandleLitEyeLookFace
+  // passes kEyeColorBlue explicitly instead, since its candle tint folds
+  // everything to monochrome orange/yellow anyway *except* it special-
+  // cases red-dominant pixels as flat solid red (see CandleFlicker::tint's
+  // preserveRed) - which a recolored red iris would trip, breaking the
+  // "always plain monochrome" look that face is supposed to keep
+  // regardless of what color the plain eye is currently showing.
+  uint16_t sample(int16_t x, int16_t y, EyeColor color = s_color) const;
 
   // Panel-space bounding box containing every pixel sample() can possibly
   // treat as anything other than the source image unchanged - callers can
