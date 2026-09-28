@@ -203,7 +203,8 @@ the plain IP address at boot as a fallback (works everywhere, mDNS or not).
 The page at `/` exposes every setting the serial console does: current
 face + a "next face" button, auto-rotate on/off and interval, face order
 (in-order/random), brightness, per-face on/off toggles, the configurable
-text message and its font, the eye-look debug logging toggle, and
+text message and its font, the Countdown face's holiday name/date (see
+"Countdown / date sync" below), the eye-look debug logging toggle, and
 save/load/reset. It polls the controller every few seconds so it stays in
 sync with physical button presses too.
 
@@ -241,6 +242,37 @@ instead:
   restarts the bridge to apply. Only meaningful on the UART build.
 - `POST /api/local-audio` - body `tone` or `voice`; plays immediately on
   this bridge's own speaker, no RP2040 involved.
+
+## Countdown / date sync
+
+The RP2040's `Countdown` face shows "`<N>` days until `<holiday>`", but the
+RP2040 itself has no battery-backed RTC - it has no idea what today's date
+is on its own, and forgets whatever it was told the moment it loses power.
+This bridge is what actually supplies that: once connected to Wi-Fi, it
+starts an SNTP client (`configTime()`), and once that's resolved a real
+time, sends it to the RP2040 as `settime <year> <month> <day>` - retried
+every 10s until the first successful sync, then every 30 minutes after
+that (frequent enough that the day count can't drift stale, infrequent
+enough not to spam the link over what's otherwise unchanging information).
+Without this bridge attached and connected, the Countdown face just shows
+a "needs the ESP32 bridge" placeholder instead of a day count - the RP2040
+firmware's `settime` command works over plain USB serial too, so it can
+still be exercised/tested with nothing but a PC and no bridge at all.
+
+**No timezone handling**: `configTime()` is called with a 0 UTC offset and
+no DST, so the date handed to the RP2040 is whatever date it currently is
+in UTC, not the pumpkin's actual local timezone. In practice this can only
+matter for a few hours right around local midnight (the day count would be
+off by one for that window) - a real timezone picker felt like unwarranted
+complexity for what's just a decorative day-count, but it's a
+straightforward addition later (an offset input in the web UI, applied to
+`configTime()`'s `gmtOffset_sec` argument) if it ever matters enough.
+
+The web UI's "Countdown" section shows the current holiday name/date and
+whether a sync has actually landed yet, and can set a new holiday name and
+target month/day (`countdown <month> <day> <name>` under the hood, same as
+every other setting here - not persisted to the RP2040's flash until you
+`save`).
 
 ## What's not persisted
 

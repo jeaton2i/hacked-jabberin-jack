@@ -16,6 +16,7 @@
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <WiFiManager.h>
+#include <time.h>
 
 #include "assets/test_word.h"
 #include "audio/i2s_player.h"
@@ -42,6 +43,26 @@ constexpr unsigned long kReplyQuietGapMs = 150;
 // request happens to land while a query is already in flight (nothing
 // actually runs concurrently here; see checkForRp2040AudioTrigger()).
 constexpr unsigned long kAudioTriggerPollMs = 500;
+
+// The RP2040 has no battery-backed RTC (see its Countdown face's class
+// comment) - this board is the only source of truth for "what day is it",
+// via NTP. Retried aggressively until the first sync actually lands (SNTP
+// hasn't necessarily resolved yet right after Wi-Fi connects), then just
+// often enough afterward to notice a real day rolling over without
+// spamming the link over what's otherwise unchanging information.
+constexpr unsigned long kTimeSyncRetryMs = 10UL * 1000UL;       // 10s
+constexpr unsigned long kTimeSyncIntervalMs = 30UL * 60UL * 1000UL; // 30min
+// getLocalTime() blocks up to this long waiting for SNTP if it hasn't
+// resolved yet - short enough not to stall the web server/audio-trigger
+// poll noticeably on a cycle where it fails.
+constexpr uint32_t kTimeSyncTimeoutMs = 2000;
+// No timezone/DST handling (see setup()'s configTime() call) - the
+// Countdown face only ever needs a plain calendar date, and this board has
+// no UI yet to ask the person which timezone they're in, so this is
+// deliberately UTC's own date rather than guessing. That can make the
+// countdown off by one for a matter of hours right around local midnight,
+// which is a fair trade against the complexity of a real timezone picker
+// for what's just a decorative day-count.
 } // namespace
 
 WebServer server(80);
@@ -238,6 +259,31 @@ void handleApiLocalAudio() {
   server.send(200, "text/plain", "OK");
 }
 
+// Feeds the RP2040's Countdown face today's actual date via "settime" (see
+// its class comment on why it can't know this on its own). Returns true
+// only on an actual successful sync - the caller uses that to switch from
+// the aggressive kTimeSyncRetryMs retry cadence to the relaxed
+// kTimeSyncIntervalMs one, only once there's an initial date to be stale
+// relative to.
+bool syncTimeToRp2040() {
+  if (!jackLinkReady()) {
+    return false;
+  }
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, kTimeSyncTimeoutMs)) {
+    return false; // SNTP hasn't resolved yet (or no internet) - retry later
+  }
+  // tm_year is years since 1900, tm_mon is 0-11 - see <time.h>. Sized
+  // generously (not just for the realistic date range) so -Werror=
+  // format-truncation can't flag this as possibly-truncating based on
+  // int's own theoretical range.
+  char cmd[64];
+  snprintf(cmd, sizeof(cmd), "settime %d %d %d", timeinfo.tm_year + 1900,
+          timeinfo.tm_mon + 1, timeinfo.tm_mday);
+  sendCommandAndRead(cmd);
+  return true;
+}
+
 void handleNotFound() { server.send(404, "text/plain", "Not found"); }
 
 void setup() {
@@ -260,6 +306,12 @@ void setup() {
   }
   Serial.print("Wi-Fi connected, IP address: ");
   Serial.println(WiFi.localIP());
+
+  // UTC (0 offset, no DST) - see kTimeSyncTimeoutMs's comment on why this
+  // doesn't attempt real timezone handling. Starts the SNTP client;
+  // doesn't block here, syncTimeToRp2040()'s getLocalTime() calls (from
+  // loop()) are what actually wait for it to resolve.
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
   if (MDNS.begin(kHostname)) {
     MDNS.addService("http", "tcp", 80);
@@ -285,11 +337,23 @@ void setup() {
 void loop() {
   server.handleClient();
 
-  static unsigned long lastAudioTriggerPollMs = 0;
   unsigned long now = millis();
+
+  static unsigned long lastAudioTriggerPollMs = 0;
   if (now - lastAudioTriggerPollMs >= kAudioTriggerPollMs) {
     lastAudioTriggerPollMs = now;
     checkForRp2040AudioTrigger();
+  }
+
+  static unsigned long lastTimeSyncMs = 0;
+  static bool timeEverSynced = false;
+  unsigned long timeSyncIntervalMs =
+      timeEverSynced ? kTimeSyncIntervalMs : kTimeSyncRetryMs;
+  if (now - lastTimeSyncMs >= timeSyncIntervalMs) {
+    lastTimeSyncMs = now;
+    if (syncTimeToRp2040()) {
+      timeEverSynced = true;
+    }
   }
 }
 

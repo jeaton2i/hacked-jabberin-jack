@@ -201,6 +201,32 @@ static const char INDEX_HTML[] = R"HTML(
   </section>
 
   <section>
+    <h2>Countdown</h2>
+    <p style="color:var(--muted);font-size:0.85em;margin:0 0 10px;">
+      Shows "&lt;N&gt; days until &lt;holiday&gt;" on the pumpkin. The
+      RP2040 has no clock of its own, so this board feeds it today's date
+      over NTP once connected - the readout below shows whether that's
+      happened yet.
+    </p>
+    <div id="countdownReadout" style="margin-bottom:10px;">&mdash;</div>
+    <label for="countdownName">Holiday name</label>
+    <input type="text" id="countdownName" maxlength="23">
+    <div class="row">
+      <div>
+        <label for="countdownMonth">Month</label>
+        <input type="number" id="countdownMonth" min="1" max="12">
+      </div>
+      <div>
+        <label for="countdownDay">Day</label>
+        <input type="number" id="countdownDay" min="1" max="31">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="countdownApplyBtn">Set &amp; Show</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Diagnostics</h2>
     <div class="switch-row">
       <label for="debugLogging" style="margin:0;">Eye-look motion debug logging</label>
@@ -408,6 +434,24 @@ function applyStatus(status) {
   var jackRxPin = document.getElementById("jackRxPin");
   if (!isEditing(jackTxPin)) { jackTxPin.value = status.esp32TxPin; }
   if (!isEditing(jackRxPin)) { jackRxPin.value = status.esp32RxPin; }
+
+  var countdown = status.countdown || {};
+  var countdownName = document.getElementById("countdownName");
+  var countdownMonth = document.getElementById("countdownMonth");
+  var countdownDay = document.getElementById("countdownDay");
+  if (!isEditing(countdownName)) { countdownName.value = countdown.holidayName || ""; }
+  if (!isEditing(countdownMonth)) { countdownMonth.value = countdown.holidayMonth || ""; }
+  if (!isEditing(countdownDay)) { countdownDay.value = countdown.holidayDay || ""; }
+  var countdownReadout = document.getElementById("countdownReadout");
+  if (!countdown.synced) {
+    countdownReadout.textContent = "Not synced yet - waiting on this board's NTP sync";
+  } else if (countdown.daysUntil === 0) {
+    countdownReadout.textContent = "Today is " + countdown.holidayName + "!";
+  } else if (countdown.daysUntil === 1) {
+    countdownReadout.textContent = "Tomorrow is " + countdown.holidayName + "!";
+  } else {
+    countdownReadout.textContent = countdown.daysUntil + " days until " + countdown.holidayName;
+  }
 }
 
 function refreshLinkPins() {
@@ -463,6 +507,17 @@ document.getElementById("textApplyBtn").addEventListener("click", function () {
 
 document.getElementById("fontSelect").addEventListener("change", function (e) {
   sendCommand("font " + e.target.value).then(refreshStatus);
+});
+
+document.getElementById("countdownApplyBtn").addEventListener("click", function () {
+  var month = parseInt(document.getElementById("countdownMonth").value, 10);
+  var day = parseInt(document.getElementById("countdownDay").value, 10);
+  var name = document.getElementById("countdownName").value.trim();
+  if (!name || !month || !day) {
+    alert("Holiday name, month, and day are all required.");
+    return;
+  }
+  sendCommand("countdown " + month + " " + day + " " + name).then(refreshStatus);
 });
 
 document.getElementById("debugLogging").addEventListener("change", function () {

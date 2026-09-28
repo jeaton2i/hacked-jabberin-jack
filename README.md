@@ -73,6 +73,12 @@ Based on the work from pburgess:
   exposes every runtime setting live (not just "pre-stored modes"), so SPI
   wouldn't have bought any more dynamism, just more complexity on both
   ends.
+- Countdown to a holiday — done: the `Countdown` face shows "`<N>` days
+  until `<holiday>`" (configurable name/date, defaults to Halloween). The
+  RP2040 has no battery-backed RTC, so it only knows what day it is once
+  the ESP32 bridge feeds it a real date over NTP (`settime`, synced
+  periodically - see `docs/esp32-network-bridge.md`); without the bridge
+  attached, it just shows a "needs the ESP32 bridge" placeholder instead.
 
 
 ## Project Layout
@@ -137,7 +143,9 @@ command list; send `help` any time to see it again.
 | `audio <tone\|voice>` | Play the synthesized test tone, or the test speech clip, over this board's own optional I2S audio output - see `docs/audio-i2s-wiring.md` |
 | `audio <esp-tone\|esp-voice>` | Queue the same to instead play on the optional ESP32 bridge's own speaker (it polls for this - see `audiotrigger`) |
 | `audiotrigger` | Read + clear the pending ESP32 audio queue - polled by the ESP32 bridge, not really meant for humans |
-| `save`        | Persist the current face selection + rotate interval + brightness + order + ESP32 link pins to flash |
+| `countdown [<month> <day> <name>]` | Show, or set, the `Countdown` face's target date/holiday name (defaults to Halloween, `10 31`) |
+| `settime <year> <month> <day>` | Feed today's actual date to the `Countdown` face - the RP2040 has no clock of its own, so this is meant to be sent periodically by the ESP32 bridge once it has real time over NTP (see `docs/esp32-network-bridge.md`); nothing stops sending it by hand too |
+| `save`        | Persist the current face selection + rotate interval + brightness + order + ESP32 link pins + countdown holiday to flash |
 | `load`        | Reload the saved config from flash                          |
 | `reset`       | Restore the compiled-in defaults (does not touch flash)     |
 | `debug`       | Toggle diagnostic logging for the animated-eye faces' motion (off by default) |
@@ -182,25 +190,28 @@ reordering or adding/removing faces in `main.cpp`.
 
 - The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
   and face interface are in place, targeting the ILI9225 220x176 panel.
-- Around 25 faces are registered and cycle via button, serial, or
+- Around 29 faces are registered and cycle via button, serial, or
   auto-rotation: geometric faces (`TriangleFace` with a warm candle flicker,
-  `TestPatternFace` — currently noisy so disabled by default, `Checkerboard`,
-  `Bullseye`, `PacMan`, `Tropical` — a palm tree fanning/swaying in the wind
-  over traveling wave lines), text faces (`TextFace`, including a
-  `ConfigurableText` instance whose message is set live over serial - see
-  "Runtime Controls"), an animated eyeball whose iris darts around inside
-  the sclera (`EyeballLookAround`), and a set of static image faces (Jack
+  plus a `TriangleFaceAnimated` variant whose mouth flaps open/closed in a
+  procedural "talking" pattern, `TestPatternFace` — currently noisy so
+  disabled by default, `Checkerboard`, `Bullseye`, `PacMan`, `Tropical` — a
+  palm tree fanning/swaying in the wind over traveling wave lines), text
+  faces (`TextFace`, including a `ConfigurableText` instance whose message
+  is set live over serial - see "Runtime Controls" - and `Countdown`, which
+  shows "`<N>` days until `<holiday>`" once the ESP32 bridge has synced a
+  real date), an animated eyeball whose iris darts around inside the
+  sclera (`EyeballLookAround`), and a set of static image faces (Jack
   Skellington, skull, commodore logo, WPI goat, robot, eyeball) - all
   available plain or candle-lit via a shared flicker helper.
 - Runtime config (which faces are enabled, the rotate interval, brightness,
-  and face order) can be changed and persisted to flash over the serial
-  console, physical buttons, or the optional ESP32 web UI — see "Runtime
-  Controls" above and `docs/esp32-network-bridge.md`.
+  face order, and the countdown holiday) can be changed and persisted to
+  flash over the serial console, physical buttons, or the optional ESP32
+  web UI — see "Runtime Controls" above and `docs/esp32-network-bridge.md`.
 - `TriangleFace` shows a visible wall of pumpkin flesh around every carved
   opening with a hot glowing interior, rather than filling it flat, for a
   3D-carved look (see "Initial Goals" above).
-- Overlays, moving mouth/eyes, full audio content, and sensors remain
-  future work.
+- Overlays, moving eyes, full audio content, and sensors remain future
+  work.
 
 ## Firmware Previews
 

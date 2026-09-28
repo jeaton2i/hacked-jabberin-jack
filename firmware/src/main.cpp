@@ -19,6 +19,7 @@
 #include "faces/candle_lit_eye_look_face.h"
 #include "faces/candle_lit_image_face.h"
 #include "faces/checkerboard_face.h"
+#include "faces/countdown_face.h"
 #include "faces/eye_look_face.h"
 #include "faces/eye_look_motion.h"
 #include "faces/face.h"
@@ -126,6 +127,7 @@ PacManFace pacManFace;
 TropicalFace tropicalFace;
 EyeLookFace eyeLookFace;
 RobotLookFace robotLookFace;
+CountdownFace countdownFace;
 
 CandleLitImageFace jackSkellingtonCandleFace(image_jack_skellington,
                                              image_jack_skellington_width,
@@ -179,12 +181,15 @@ Face *faces[] = {&triangleFace,
                  &robotLookCandleFace,
                  &happyHalloweenFace,
                  &booFace,
-                 // Placed here (not next to &triangleFace above) so every
-                 // other face's saved-config bit position stays unchanged -
-                 // only configurableTextFace/statusMessageFace shift, and
-                 // they recompute their own fixed index from kFaceCount so
-                 // that's harmless.
+                 // Placed here (not next to &triangleFace/&countdownFace's
+                 // own natural spots above) so every other face's
+                 // saved-config bit position stays unchanged - only
+                 // configurableTextFace/statusMessageFace shift, and they
+                 // recompute their own fixed index from kFaceCount so
+                 // that's harmless. Same reasoning each time a face gets
+                 // added from here on.
                  &triangleFaceAnimated,
+                 &countdownFace,
                  &configurableTextFace,
                  &statusMessageFace};
 const char *faceNames[] = {"TriangleFace",
@@ -214,15 +219,17 @@ const char *faceNames[] = {"TriangleFace",
                            "HappyHalloweenText",
                            "BooText",
                            "TriangleFaceAnimated",
+                           "Countdown",
                            "ConfigurableText",
                            "StatusMessage"};
 constexpr size_t kFaceCount = sizeof(faces) / sizeof(faces[0]);
 // enabledMask packs one bit per face; a wider mask type or a bitset would be
 // needed past 32 faces.
 static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
-// Fixed indices for the two faces jumped to directly by index rather than
-// reached through the normal rotation (see the "text"/"font" commands and
-// showStatusMessage).
+// Fixed indices for the faces jumped to directly by index rather than
+// reached through the normal rotation (see the "text"/"font"/"countdown"
+// commands and showStatusMessage).
+constexpr size_t kCountdownFaceIndex = kFaceCount - 3;
 constexpr size_t kConfigurableTextFaceIndex = kFaceCount - 2;
 constexpr size_t kStatusMessageFaceIndex = kFaceCount - 1;
 
@@ -257,6 +264,8 @@ const bool kDefaultFaceEnabled[kFaceCount] = {
     true, // BooText
     false, // TriangleFaceAnimated - opt-in, so the mouth doesn't suddenly
            // start flapping in rotation until asked for
+    false, // Countdown - opt-in, and useless in rotation until the ESP32
+           // bridge has actually synced a date at least once anyway
     true, // ConfigurableText
     false // StatusMessage
   };
@@ -382,6 +391,33 @@ void applyEnabledMask(uint32_t mask) {
   }
 }
 
+// kPrefsHolidayNameLength (prefs.h) is duplicated rather than shared with
+// CountdownFace::kMaxHolidayNameLength (see prefs.h's comment on why) -
+// this catches the two ever drifting apart, in the one file that already
+// includes both headers.
+static_assert(kPrefsHolidayNameLength == CountdownFace::kMaxHolidayNameLength,
+             "prefs.h's holiday name buffer no longer matches "
+             "CountdownFace's");
+
+// Snapshots everything "save" and "esp32link" persist to flash from its
+// current live state - shared so the two call sites can't drift apart as
+// fields get added.
+Prefs buildCurrentPrefs() {
+  Prefs prefs;
+  prefs.enabledMask = currentEnabledMask();
+  prefs.rotateMs = autoRotateMs;
+  prefs.brightnessPercent = (uint32_t)(CandleFlicker::brightness() * 100.0f);
+  prefs.randomOrder = (uint32_t)(randomOrder ? 1 : 0);
+  prefs.esp32TxPin = (uint32_t)esp32TxPin;
+  prefs.esp32RxPin = (uint32_t)esp32RxPin;
+  strncpy(prefs.holidayName, countdownFace.holidayName(),
+         sizeof(prefs.holidayName) - 1);
+  prefs.holidayName[sizeof(prefs.holidayName) - 1] = '\0';
+  prefs.holidayMonth = countdownFace.holidayMonth();
+  prefs.holidayDay = countdownFace.holidayDay();
+  return prefs;
+}
+
 // Initializes the ESP32 bridge UART using the current esp32TxPin/
 // esp32RxPin. Called exactly once, from setup(), after esp32TxPin/RxPin
 // have their final boot-time values (compiled-in defaults, then possibly
@@ -404,6 +440,7 @@ void resetToDefaults() {
   esp32TxPin = kDefaultPinEsp32Tx;
   esp32RxPin = kDefaultPinEsp32Rx;
   CandleFlicker::setBrightness(kDefaultBrightnessPercent / 100.0f);
+  countdownFace.setHoliday("Halloween", 10, 31);
 }
 
 void selectFace(size_t index) {
@@ -552,6 +589,17 @@ void printStatusJson() {
   cmdOut->print(esp32TxPin);
   cmdOut->print(",\"esp32RxPin\":");
   cmdOut->print(esp32RxPin);
+  cmdOut->print(",\"countdown\":{\"holidayName\":\"");
+  cmdOut->print(countdownFace.holidayName());
+  cmdOut->print("\",\"holidayMonth\":");
+  cmdOut->print(countdownFace.holidayMonth());
+  cmdOut->print(",\"holidayDay\":");
+  cmdOut->print(countdownFace.holidayDay());
+  cmdOut->print(",\"synced\":");
+  cmdOut->print(countdownFace.synced() ? "true" : "false");
+  cmdOut->print(",\"daysUntil\":");
+  cmdOut->print(countdownFace.daysUntil());
+  cmdOut->print("}");
 
   cmdOut->print(",\"fonts\":[");
   for (size_t i = 0; i < kFontOptionCount; i++) {
@@ -597,6 +645,8 @@ void printHelp() {
   cmdOut->println("  brightness [percent] - show/set candle brightness (100=original)");
   cmdOut->println("  order [random|in-order] - show/set face advance order");
   cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
+  cmdOut->println("  countdown [<month> <day> <name>] - show, or set, the Countdown face's target date/holiday name");
+  cmdOut->println("  settime <year> <month> <day> - feed today's actual date to the Countdown face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  audio <tone|voice> - play the synthesized test tone, or the test speech clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
   cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
@@ -670,15 +720,9 @@ void handleSerialCommand(const char *line) {
     return;
   }
   if (strcmp(line, "save") == 0) {
-    Prefs prefs{currentEnabledMask(),
-               autoRotateMs,
-               (uint32_t)(CandleFlicker::brightness() * 100.0f),
-               (uint32_t)(randomOrder ? 1 : 0),
-               (uint32_t)esp32TxPin,
-               (uint32_t)esp32RxPin};
-    savePrefs(prefs);
+    savePrefs(buildCurrentPrefs());
     cmdOut->println("Saved current faces + rotate interval + brightness + "
-                    "order + ESP32 link pins to flash");
+                    "order + ESP32 link pins + countdown holiday to flash");
     return;
   }
   if (strcmp(line, "load") == 0) {
@@ -688,6 +732,8 @@ void handleSerialCommand(const char *line) {
       autoRotateMs = prefs.rotateMs;
       CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
       randomOrder = prefs.randomOrder != 0;
+      countdownFace.setHoliday(prefs.holidayName, (uint8_t)prefs.holidayMonth,
+                               (uint8_t)prefs.holidayDay);
       if (isValidUart1Pins((int8_t)prefs.esp32TxPin,
                           (int8_t)prefs.esp32RxPin)) {
         esp32TxPin = (int8_t)prefs.esp32TxPin;
@@ -785,13 +831,7 @@ void handleSerialCommand(const char *line) {
     // comment) - so unlike every other setting here, this one is pointless
     // without also saving *and* rebooting, or the new pins would just be
     // discarded the moment anything else reboots the board.
-    Prefs prefs{currentEnabledMask(),
-               autoRotateMs,
-               (uint32_t)(CandleFlicker::brightness() * 100.0f),
-               (uint32_t)(randomOrder ? 1 : 0),
-               (uint32_t)esp32TxPin,
-               (uint32_t)esp32RxPin};
-    savePrefs(prefs);
+    savePrefs(buildCurrentPrefs());
     cmdOut->print("ESP32 link pins set to: tx=");
     cmdOut->print(tx);
     cmdOut->print(" rx=");
@@ -800,6 +840,72 @@ void handleSerialCommand(const char *line) {
     cmdOut->flush();
     delay(50);
     rp2040.reboot();
+    return;
+  }
+  if (strncmp(line, "countdown", 9) == 0 &&
+      (line[9] == '\0' || line[9] == ' ')) {
+    const char *arg = skipSpaces(line + 9);
+    if (arg[0] == '\0') {
+      cmdOut->print("Countdown target: ");
+      cmdOut->print(countdownFace.holidayName());
+      cmdOut->print(" (");
+      cmdOut->print(countdownFace.holidayMonth());
+      cmdOut->print("/");
+      cmdOut->print(countdownFace.holidayDay());
+      cmdOut->print("), ");
+      cmdOut->println(countdownFace.synced()
+                          ? "date synced"
+                          : "not synced yet (needs the ESP32 bridge)");
+      return;
+    }
+    char *end;
+    long month = strtol(arg, &end, 10);
+    const char *dayArg = (end == arg) ? end : skipSpaces(end);
+    long day = strtol(dayArg, &end, 10);
+    const char *name = (end == dayArg) ? end : skipSpaces(end);
+    if (end == dayArg || name[0] == '\0' || month < 1 || month > 12 ||
+        day < 1 || day > 31) {
+      cmdOut->println("Usage: countdown <month> <day> <holiday name>");
+      return;
+    }
+    countdownFace.setHoliday(name, (uint8_t)month, (uint8_t)day);
+    // Jump straight to it, same as "text"/"font" do for ConfigurableText -
+    // immediate visual feedback for what was just set.
+    selectFace(kCountdownFaceIndex);
+    cmdOut->print("Countdown target set to: ");
+    cmdOut->print(countdownFace.holidayName());
+    cmdOut->print(" (");
+    cmdOut->print(month);
+    cmdOut->print("/");
+    cmdOut->print(day);
+    cmdOut->println(")");
+    return;
+  }
+  if (strncmp(line, "settime", 7) == 0 &&
+      (line[7] == '\0' || line[7] == ' ')) {
+    // Meant to be sent by the ESP32 bridge once it has a real date from
+    // NTP (see docs/esp32-network-bridge.md) - nothing stops a human from
+    // using it directly too, e.g. to test the Countdown face without an
+    // ESP32 attached at all.
+    const char *arg = skipSpaces(line + 7);
+    char *end;
+    long year = strtol(arg, &end, 10);
+    const char *monthArg = (end == arg) ? end : skipSpaces(end);
+    long month = strtol(monthArg, &end, 10);
+    const char *dayArg = (end == monthArg) ? end : skipSpaces(end);
+    long day = strtol(dayArg, &end, 10);
+    if (end == dayArg || year < 2000 || year > 9999 || month < 1 ||
+        month > 12 || day < 1 || day > 31) {
+      cmdOut->println("Usage: settime <year> <month> <day>");
+      return;
+    }
+    countdownFace.setSyncedDate((uint16_t)year, (uint8_t)month, (uint8_t)day);
+    cmdOut->print("Date synced: ");
+    cmdOut->print(year);
+    cmdOut->print("-");
+    cmdOut->print(month);
+    cmdOut->print("-");
+    cmdOut->println(day);
     return;
   }
   if (strncmp(line, "audio", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
@@ -968,6 +1074,8 @@ void setup() {
     autoRotateMs = prefs.rotateMs;
     CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
     randomOrder = prefs.randomOrder != 0;
+    countdownFace.setHoliday(prefs.holidayName, (uint8_t)prefs.holidayMonth,
+                             (uint8_t)prefs.holidayDay);
     // Validated before ever reaching beginEsp32Link() below: requesting an
     // invalid UART1 pin from the SDK hard-faults the whole chip before USB
     // even finishes enumerating, which would otherwise turn one bad saved
