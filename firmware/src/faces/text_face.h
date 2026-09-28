@@ -36,6 +36,11 @@ public:
   // before begin() too, same as setText().
   void setFont(const GFXfont *font, bool smooth);
 
+  // Read back the currently-displayed lines (main.cpp uses this to persist
+  // them via Prefs - see buildCurrentPrefs()). index must be < lineCount().
+  uint8_t lineCount() const { return _lineCount; }
+  const char *line(uint8_t index) const { return _lines[index]; }
+
 private:
   void render();
 

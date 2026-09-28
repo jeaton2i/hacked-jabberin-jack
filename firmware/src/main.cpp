@@ -19,6 +19,7 @@
 #include "faces/candle_lit_eye_look_face.h"
 #include "faces/candle_lit_image_face.h"
 #include "faces/checkerboard_face.h"
+#include "faces/clock_face.h"
 #include "faces/countdown_face.h"
 #include "faces/eye_look_face.h"
 #include "faces/eye_look_motion.h"
@@ -128,6 +129,7 @@ TropicalFace tropicalFace;
 EyeLookFace eyeLookFace;
 RobotLookFace robotLookFace;
 CountdownFace countdownFace;
+ClockFace clockFace;
 
 CandleLitImageFace jackSkellingtonCandleFace(image_jack_skellington,
                                              image_jack_skellington_width,
@@ -190,6 +192,7 @@ Face *faces[] = {&triangleFace,
                  // added from here on.
                  &triangleFaceAnimated,
                  &countdownFace,
+                 &clockFace,
                  &configurableTextFace,
                  &statusMessageFace};
 const char *faceNames[] = {"TriangleFace",
@@ -220,6 +223,7 @@ const char *faceNames[] = {"TriangleFace",
                            "BooText",
                            "TriangleFaceAnimated",
                            "Countdown",
+                           "Clock",
                            "ConfigurableText",
                            "StatusMessage"};
 constexpr size_t kFaceCount = sizeof(faces) / sizeof(faces[0]);
@@ -229,7 +233,8 @@ static_assert(kFaceCount <= 32, "faceEnabled no longer fits a uint32_t mask");
 // Fixed indices for the faces jumped to directly by index rather than
 // reached through the normal rotation (see the "text"/"font"/"countdown"
 // commands and showStatusMessage).
-constexpr size_t kCountdownFaceIndex = kFaceCount - 3;
+constexpr size_t kCountdownFaceIndex = kFaceCount - 4;
+constexpr size_t kClockFaceIndex = kFaceCount - 3;
 constexpr size_t kConfigurableTextFaceIndex = kFaceCount - 2;
 constexpr size_t kStatusMessageFaceIndex = kFaceCount - 1;
 
@@ -266,6 +271,8 @@ const bool kDefaultFaceEnabled[kFaceCount] = {
            // start flapping in rotation until asked for
     false, // Countdown - opt-in, and useless in rotation until the ESP32
            // bridge has actually synced a date at least once anyway
+    false, // Clock - opt-in, same reasoning as Countdown (useless until
+           // the ESP32 bridge has synced a time at least once)
     true, // ConfigurableText
     false // StatusMessage
   };
@@ -273,9 +280,14 @@ bool faceEnabled[kFaceCount];
 
 // Fonts ConfigurableTextFace can be switched between over serial (see the
 // "font" command). The plain entries get TextFace's nearest-neighbor zoom,
-// which is what gives the chunky pixelated look; the "-smooth" entries
-// bilinearly resample instead for anti-aliased edges - same letterforms,
-// different texture.
+// which is what gives the chunky pixelated look; TextFace also supports a
+// "smooth" bilinearly-resampled style (see its setFont()) for anti-aliased
+// edges - same letterforms, different texture. That style's own options
+// are commented out below rather than removed: they looked fine on this
+// pumpkin (see the memory fixes this took to get there), but are held back
+// as unproven on the larger pumpkin until that gets its own pass, without
+// losing the rendering support itself - just uncomment a line to bring
+// one back.
 struct FontOption {
   const char *name;
   const GFXfont *font;
@@ -283,11 +295,11 @@ struct FontOption {
 };
 const FontOption kFontOptions[] = {
     {"sans", &FreeSansBold10pt7b, false}, // default
-    {"sans-smooth", &FreeSansBold10pt7b, true},
+    // {"sans-smooth", &FreeSansBold10pt7b, true},
     {"mono", &FreeMono8pt7b, false},
-    {"mono-smooth", &FreeMono8pt7b, true},
+    // {"mono-smooth", &FreeMono8pt7b, true},
     {"serif", &FreeSerifBoldItalic12pt7b, false},
-    {"serif-smooth", &FreeSerifBoldItalic12pt7b, true},
+    // {"serif-smooth", &FreeSerifBoldItalic12pt7b, true},
 };
 constexpr size_t kFontOptionCount =
     sizeof(kFontOptions) / sizeof(kFontOptions[0]);
@@ -358,9 +370,18 @@ bool buttonPressed(DebouncedButton &button, unsigned long now) {
   return pressed;
 }
 
-// Long enough for "text " plus two full TextFace::kMaxLineLength lines and
-// the "|" that separates them.
-constexpr size_t kSerialLineCapacity = 104;
+// Long enough for "text " plus all TextFace::kMaxLines lines at their full
+// TextFace::kMaxLineLength, plus the "|" separators between them and a
+// terminating '\0'. This used to only fit two lines' worth despite "text"
+// documenting support for up to kMaxLines - anything longer than that got
+// silently cut off mid-command (see pollSerialPort()'s bounds check
+// below), which for a cut landing mid-line meant whatever partial bytes
+// were left got parsed and displayed as garbage instead of just being
+// truncated cleanly.
+constexpr size_t kSerialLineCapacity =
+    5 /* "text " */ +
+    TextFace::kMaxLines * (TextFace::kMaxLineLength - 1) /* line contents */
+    + (TextFace::kMaxLines - 1) /* "|" separators */ + 1 /* '\0' */;
 struct SerialPort {
   Stream *stream;
   char line[kSerialLineCapacity];
@@ -398,6 +419,10 @@ void applyEnabledMask(uint32_t mask) {
 static_assert(kPrefsHolidayNameLength == CountdownFace::kMaxHolidayNameLength,
              "prefs.h's holiday name buffer no longer matches "
              "CountdownFace's");
+static_assert(kPrefsTextLineLength == TextFace::kMaxLineLength,
+             "prefs.h's text line buffer no longer matches TextFace's");
+static_assert(kPrefsTextLineCount == TextFace::kMaxLines,
+             "prefs.h's text line count no longer matches TextFace's");
 
 // Snapshots everything "save" and "esp32link" persist to flash from its
 // current live state - shared so the two call sites can't drift apart as
@@ -415,7 +440,40 @@ Prefs buildCurrentPrefs() {
   prefs.holidayName[sizeof(prefs.holidayName) - 1] = '\0';
   prefs.holidayMonth = countdownFace.holidayMonth();
   prefs.holidayDay = countdownFace.holidayDay();
+  for (uint8_t i = 0; i < TextFace::kMaxLines; i++) {
+    if (i < configurableTextFace.lineCount()) {
+      strncpy(prefs.textLines[i], configurableTextFace.line(i),
+             sizeof(prefs.textLines[i]) - 1);
+      prefs.textLines[i][sizeof(prefs.textLines[i]) - 1] = '\0';
+    } else {
+      prefs.textLines[i][0] = '\0';
+    }
+  }
+  prefs.textFontIndex = (uint32_t)currentFontIndex;
+  prefs.clockUse12Hour = clockFace.use12Hour() ? 1 : 0;
   return prefs;
+}
+
+// Applies a loaded Prefs' ConfigurableText fields - shared by setup() and
+// the "load" command so they can't drift apart. Doesn't call selectFace();
+// unlike the "text"/"font" serial commands, loading saved config shouldn't
+// jump the display to ConfigurableText on its own.
+void applyTextPrefs(const Prefs &prefs) {
+  const char *lines[TextFace::kMaxLines] = {nullptr, nullptr, nullptr,
+                                            nullptr};
+  for (uint8_t i = 0; i < TextFace::kMaxLines; i++) {
+    if (prefs.textLines[i][0] != '\0') {
+      lines[i] = prefs.textLines[i];
+    }
+  }
+  configurableTextFace.setText(lines[0], lines[1], lines[2], lines[3]);
+
+  if (prefs.textFontIndex < kFontOptionCount) {
+    currentFontIndex = (size_t)prefs.textFontIndex;
+    configurableTextFace.setFont(kFontOptions[currentFontIndex].font,
+                                 kFontOptions[currentFontIndex].smooth);
+  }
+  clockFace.setUse12Hour(prefs.clockUse12Hour != 0);
 }
 
 // Initializes the ESP32 bridge UART using the current esp32TxPin/
@@ -430,6 +488,17 @@ Prefs buildCurrentPrefs() {
 void beginEsp32Link() {
   Serial2.setTX(esp32TxPin);
   Serial2.setRX(esp32RxPin);
+  // arduino-pico's SerialUART defaults to a 32-byte RX FIFO (see its
+  // _fifoSize) - too small for this link's own traffic: any single command
+  // longer than that (a multi-line "text"/"countdown" easily is) arrives
+  // faster than pollSerial() drains it between loop() iterations, so the
+  // FIFO wraps and the tail of that command gets overwritten by whatever's
+  // received next (observed as e.g. a "text" line's end getting spliced
+  // with a later "audiotrigger" poll - not a race between those two
+  // commands at all, just this buffer being too small for either alone).
+  // Sized comfortably above kSerialLineCapacity, the longest single line
+  // this link ever needs to carry intact.
+  Serial2.setFIFOSize(256);
   Serial2.begin(115200);
 }
 
@@ -441,6 +510,11 @@ void resetToDefaults() {
   esp32RxPin = kDefaultPinEsp32Rx;
   CandleFlicker::setBrightness(kDefaultBrightnessPercent / 100.0f);
   countdownFace.setHoliday("Halloween", 10, 31);
+  currentFontIndex = 0;
+  configurableTextFace.setText("Set my text!");
+  configurableTextFace.setFont(kFontOptions[currentFontIndex].font,
+                               kFontOptions[currentFontIndex].smooth);
+  clockFace.setUse12Hour(false);
 }
 
 void selectFace(size_t index) {
@@ -566,6 +640,27 @@ void printFaceList() {
   }
 }
 
+// Minimal JSON string escaping for embedding arbitrary user-entered text
+// (ConfigurableText's lines) into printStatusJson()'s output - without
+// this, a line containing '"' or '\' would produce invalid JSON.
+void printJsonEscaped(const char *s) {
+  for (const char *p = s; *p; p++) {
+    switch (*p) {
+    case '"':
+      cmdOut->print("\\\"");
+      break;
+    case '\\':
+      cmdOut->print("\\\\");
+      break;
+    case '\n':
+      cmdOut->print("\\n");
+      break;
+    default:
+      cmdOut->print(*p);
+    }
+  }
+}
+
 // Machine-readable snapshot of everything the "list"/"brightness"/"order"/
 // "font" commands otherwise report only in human-oriented text - used by the
 // optional ESP32 bridge (see docs/esp32-network-bridge.md) so it doesn't
@@ -601,6 +696,10 @@ void printStatusJson() {
   cmdOut->print(countdownFace.daysUntil());
   cmdOut->print("}");
 
+  cmdOut->print(",\"clock\":{\"synced\":");
+  cmdOut->print(clockFace.synced() ? "true" : "false");
+  cmdOut->print("}");
+
   cmdOut->print(",\"fonts\":[");
   for (size_t i = 0; i < kFontOptionCount; i++) {
     if (i > 0) {
@@ -608,6 +707,19 @@ void printStatusJson() {
     }
     cmdOut->print("\"");
     cmdOut->print(kFontOptions[i].name);
+    cmdOut->print("\"");
+  }
+
+  // ConfigurableText's current lines - lets remote UIs (and the "text"
+  // command's own users) see what's actually stored/rendered, rather than
+  // only ever being able to overwrite it blind.
+  cmdOut->print("],\"text\":[");
+  for (uint8_t i = 0; i < configurableTextFace.lineCount(); i++) {
+    if (i > 0) {
+      cmdOut->print(",");
+    }
+    cmdOut->print("\"");
+    printJsonEscaped(configurableTextFace.line(i));
     cmdOut->print("\"");
   }
 
@@ -647,6 +759,8 @@ void printHelp() {
   cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
   cmdOut->println("  countdown [<month> <day> <name>] - show, or set, the Countdown face's target date/holiday name (name may contain one '|' to split it across 2 lines)");
   cmdOut->println("  settime <year> <month> <day> - feed today's actual date to the Countdown face (meant for the ESP32 bridge's NTP sync)");
+  cmdOut->println("  setclock <hour 0-23> <minute> <second> - feed the current wall-clock time to the Clock face (meant for the ESP32 bridge's NTP sync)");
+  cmdOut->println("  clockformat [12|24] - show, or set, whether the Clock face displays 12- or 24-hour time (default 24)");
   cmdOut->println("  audio <tone|voice> - play the synthesized test tone, or the test speech clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
   cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
@@ -734,6 +848,7 @@ void handleSerialCommand(const char *line) {
       randomOrder = prefs.randomOrder != 0;
       countdownFace.setHoliday(prefs.holidayName, (uint8_t)prefs.holidayMonth,
                                (uint8_t)prefs.holidayDay);
+      applyTextPrefs(prefs);
       if (isValidUart1Pins((int8_t)prefs.esp32TxPin,
                           (int8_t)prefs.esp32RxPin)) {
         esp32TxPin = (int8_t)prefs.esp32TxPin;
@@ -909,6 +1024,53 @@ void handleSerialCommand(const char *line) {
     cmdOut->println(day);
     return;
   }
+  if (strncmp(line, "setclock", 8) == 0 &&
+      (line[8] == '\0' || line[8] == ' ')) {
+    // Paired with "settime" above (see its comment) but feeds the Clock
+    // face's wall-clock time instead of the Countdown face's date -
+    // separate command since they're unrelated faces with unrelated
+    // state, sent together by the ESP32 bridge's own periodic sync.
+    const char *arg = skipSpaces(line + 8);
+    char *end;
+    long hour = strtol(arg, &end, 10);
+    const char *minuteArg = (end == arg) ? end : skipSpaces(end);
+    long minute = strtol(minuteArg, &end, 10);
+    const char *secondArg = (end == minuteArg) ? end : skipSpaces(end);
+    long second = strtol(secondArg, &end, 10);
+    if (end == secondArg || hour < 0 || hour > 23 || minute < 0 ||
+        minute > 59 || second < 0 || second > 59) {
+      cmdOut->println("Usage: setclock <hour 0-23> <minute> <second>");
+      return;
+    }
+    clockFace.setSyncedTime((uint8_t)hour, (uint8_t)minute, (uint8_t)second);
+    cmdOut->print("Clock synced: ");
+    cmdOut->print(hour);
+    cmdOut->print(":");
+    cmdOut->print(minute);
+    cmdOut->print(":");
+    cmdOut->println(second);
+    return;
+  }
+  if (strncmp(line, "clockformat", 11) == 0 &&
+      (line[11] == '\0' || line[11] == ' ')) {
+    const char *arg = skipSpaces(line + 11);
+    if (arg[0] == '\0') {
+      cmdOut->print("Clock format: ");
+      cmdOut->println(clockFace.use12Hour() ? "12" : "24");
+      return;
+    }
+    if (strcmp(arg, "12") == 0) {
+      clockFace.setUse12Hour(true);
+    } else if (strcmp(arg, "24") == 0) {
+      clockFace.setUse12Hour(false);
+    } else {
+      cmdOut->println("Usage: clockformat [12|24]");
+      return;
+    }
+    cmdOut->print("Clock format set to: ");
+    cmdOut->println(arg);
+    return;
+  }
   if (strncmp(line, "audio", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
     const char *arg = skipSpaces(line + 5);
     if (strcmp(arg, "tone") == 0) {
@@ -1077,6 +1239,7 @@ void setup() {
     randomOrder = prefs.randomOrder != 0;
     countdownFace.setHoliday(prefs.holidayName, (uint8_t)prefs.holidayMonth,
                              (uint8_t)prefs.holidayDay);
+    applyTextPrefs(prefs);
     // Validated before ever reaching beginEsp32Link() below: requesting an
     // invalid UART1 pin from the SDK hard-faults the whole chip before USB
     // even finishes enumerating, which would otherwise turn one bad saved

@@ -427,6 +427,14 @@ function applyStatus(status) {
     fontSelect.value = status.font;
   }
 
+  var textLines = status.text || [];
+  for (var n = 1; n <= 4; n++) {
+    var lineInput = document.getElementById("textLine" + n);
+    if (!isEditing(lineInput)) {
+      lineInput.value = textLines[n - 1] || "";
+    }
+  }
+
   var debugLogging = document.getElementById("debugLogging");
   if (!isEditing(debugLogging)) {
     debugLogging.checked = status.debugLogging;

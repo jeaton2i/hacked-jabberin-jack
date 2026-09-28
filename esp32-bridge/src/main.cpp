@@ -33,7 +33,17 @@ constexpr const char *kSetupApPassword = "pumpkin123"; // >= 8 chars for WPA2
 // (a handful of characters arrive in well under a millisecond over either
 // transport, so 150ms of silence comfortably means the reply is over, not
 // that another line is still coming).
-constexpr unsigned long kReplyTimeoutMs = 1500;
+// Was 1500ms - too short for some faces' render (e.g. Countdown's
+// "not synced yet" path draws 4 lines). If this board's own reply doesn't
+// land before the caller gives up, sendCommandInFlight's guard (below)
+// also gives up with it, letting the next periodic audiotrigger poll fire
+// its own command while the RP2040 is still mid-render on this one - two
+// commands' bytes both landing on the wire at once, observed corrupting
+// whichever one was still in flight (e.g. a holiday name ending up with
+// "audiotrigger" spliced into it). Widened generously since a slow reply
+// only costs time on that one slow request, not normal-case
+// responsiveness.
+constexpr unsigned long kReplyTimeoutMs = 4000;
 constexpr unsigned long kReplyQuietGapMs = 150;
 
 // How often to ask the RP2040 whether it has audio queued for this
@@ -44,18 +54,25 @@ constexpr unsigned long kReplyQuietGapMs = 150;
 // actually runs concurrently here; see checkForRp2040AudioTrigger()).
 constexpr unsigned long kAudioTriggerPollMs = 500;
 
-// The RP2040 has no battery-backed RTC (see its Countdown face's class
-// comment) - this board is the only source of truth for "what day is it",
-// via NTP. Retried aggressively until the first sync actually lands (SNTP
-// hasn't necessarily resolved yet right after Wi-Fi connects), then just
-// often enough afterward to notice a real day rolling over without
-// spamming the link over what's otherwise unchanging information.
-constexpr unsigned long kTimeSyncRetryMs = 10UL * 1000UL;       // 10s
-constexpr unsigned long kTimeSyncIntervalMs = 30UL * 60UL * 1000UL; // 30min
-// getLocalTime() blocks up to this long waiting for SNTP if it hasn't
-// resolved yet - short enough not to stall the web server/audio-trigger
-// poll noticeably on a cycle where it fails.
-constexpr uint32_t kTimeSyncTimeoutMs = 2000;
+// The RP2040 has no battery-backed RTC (see its Countdown/Clock faces'
+// class comments) - this board is the only source of truth for "what day/
+// time is it", via NTP. Always retried on this same cadence (see
+// syncTimeToRp2040()'s comment on why there's no slower "steady-state"
+// interval) rather than just often enough to catch a day rolling over -
+// the Clock face needs this frequent enough to actually look alive.
+constexpr unsigned long kTimeSyncRetryMs = 10UL * 1000UL; // 10s
+// getLocalTime() doesn't just read the clock - if SNTP hasn't resolved
+// yet, it busy-polls (delay(10) between checks) for up to this long
+// before giving up, blocking everything else in loop() (the web server,
+// the audio-trigger poll) for the whole wait. SNTP resolves on its own
+// schedule regardless of whether this call is sitting around waiting for
+// it, so a longer timeout here doesn't make it arrive any sooner - it
+// only makes a failed check more expensive. 0 asks it to check the clock
+// exactly once (its while(...) condition is still true on the first pass)
+// and return immediately: worst case one ~10ms delay() if not synced yet,
+// instead of stalling up to 2s - the outer kTimeSyncRetryMs retry loop is
+// what actually waits between attempts.
+constexpr uint32_t kTimeSyncTimeoutMs = 0;
 // No timezone/DST handling (see setup()'s configTime() call) - the
 // Countdown face only ever needs a plain calendar date, and this board has
 // no UI yet to ask the person which timezone they're in, so this is
@@ -74,13 +91,37 @@ void drainJackLink() {
   }
 }
 
+// Guards every sendCommandAndRead() call below against overlapping with
+// another one. Root-caused via extensive tracing: if the RP2040 takes
+// longer than kReplyTimeoutMs to reply (some faces' render legitimately
+// can, which is why that constant was widened), the caller here gives up
+// and this flag is released - and without this guard, the periodic
+// checkForRp2040AudioTrigger() poll could then fire its own command while
+// the RP2040 was still mid-render on the earlier one, landing two
+// commands' bytes on the wire close enough together to corrupt whichever
+// one was still in flight (observed as e.g. a holiday name ending up with
+// "audiotrigger" spliced into it). The low-priority, frequent audiotrigger
+// poll is the one that backs off (returning "" - treated the same as its
+// own ordinary "didn't reply in time" case) rather than ever risk a
+// second write landing on the wire while an earlier one is still going.
+bool sendCommandInFlight = false;
+
 // Sends `cmd` (without a trailing newline - this adds it) to the RP2040 and
 // collects whatever it prints back, stripping '\r' but keeping '\n' between
 // lines (some commands like "list" reply with several). Returns "" if
-// nothing came back within kReplyTimeoutMs.
+// nothing came back within kReplyTimeoutMs (also returned immediately,
+// without sending anything, if another call is already in flight).
 String sendCommandAndRead(const String &cmd) {
+  if (sendCommandInFlight) {
+    return "";
+  }
+  sendCommandInFlight = true;
   Stream &link = jackLink();
   drainJackLink();
+  Serial.print("DEBUG sending cmd=<<<");
+  Serial.print(cmd);
+  Serial.println(">>>");
+  Serial.flush();
   link.print(cmd);
   link.print('\n');
 
@@ -109,6 +150,7 @@ String sendCommandAndRead(const String &cmd) {
     }
     yield();
   }
+  sendCommandInFlight = false;
   return reply;
 }
 
@@ -260,11 +302,16 @@ void handleApiLocalAudio() {
 }
 
 // Feeds the RP2040's Countdown face today's actual date via "settime" (see
-// its class comment on why it can't know this on its own). Returns true
-// only on an actual successful sync - the caller uses that to switch from
-// the aggressive kTimeSyncRetryMs retry cadence to the relaxed
-// kTimeSyncIntervalMs one, only once there's an initial date to be stale
-// relative to.
+// its class comment on why it can't know this on its own). Runs on the
+// same fixed kTimeSyncRetryMs cadence forever rather than backing off once
+// it's ever succeeded - both getLocalTime() (now a single free clock read,
+// not a blocking wait) and settime itself (a few bytes over this board's
+// own private wired link to the RP2040, not a request to any external
+// server) are cheap enough that there's no real cost to just always
+// retrying, and it means a RP2040 that reboots on its own (it has no RTC -
+// see CountdownFace's class comment - so it forgets the date completely)
+// gets a fresh date within seconds instead of waiting up to 30 minutes for
+// this board to notice.
 bool syncTimeToRp2040() {
   if (!jackLinkReady()) {
     return false;
@@ -280,6 +327,13 @@ bool syncTimeToRp2040() {
   char cmd[64];
   snprintf(cmd, sizeof(cmd), "settime %d %d %d", timeinfo.tm_year + 1900,
           timeinfo.tm_mon + 1, timeinfo.tm_mday);
+  sendCommandAndRead(cmd);
+  // Same already-localized (see setup()'s configTzTime()) timeinfo also
+  // feeds the Clock face's wall-clock time - a separate command since it's
+  // a separate, unrelated face's state (see main.cpp's "setclock" comment
+  // on the RP2040 side).
+  snprintf(cmd, sizeof(cmd), "setclock %d %d %d", timeinfo.tm_hour,
+          timeinfo.tm_min, timeinfo.tm_sec);
   sendCommandAndRead(cmd);
   return true;
 }
@@ -307,11 +361,15 @@ void setup() {
   Serial.print("Wi-Fi connected, IP address: ");
   Serial.println(WiFi.localIP());
 
-  // UTC (0 offset, no DST) - see kTimeSyncTimeoutMs's comment on why this
-  // doesn't attempt real timezone handling. Starts the SNTP client;
+  // Hardcoded to US Eastern (with its usual DST rule) rather than a real
+  // timezone picker - there's no UI yet to ask the person which timezone
+  // they're in, and this is what this particular pumpkin actually needs.
+  // The POSIX TZ string's DST rule (2nd Sunday of March - 1st Sunday of
+  // November) handles the spring/fall transitions on its own; nothing
+  // else here needs to think about DST again. Starts the SNTP client;
   // doesn't block here, syncTimeToRp2040()'s getLocalTime() calls (from
   // loop()) are what actually wait for it to resolve.
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  configTzTime("EST5EDT,M3.2.0,M11.1.0", "pool.ntp.org", "time.nist.gov");
 
   if (MDNS.begin(kHostname)) {
     MDNS.addService("http", "tcp", 80);
@@ -346,14 +404,9 @@ void loop() {
   }
 
   static unsigned long lastTimeSyncMs = 0;
-  static bool timeEverSynced = false;
-  unsigned long timeSyncIntervalMs =
-      timeEverSynced ? kTimeSyncIntervalMs : kTimeSyncRetryMs;
-  if (now - lastTimeSyncMs >= timeSyncIntervalMs) {
+  if (now - lastTimeSyncMs >= kTimeSyncRetryMs) {
     lastTimeSyncMs = now;
-    if (syncTimeToRp2040()) {
-      timeEverSynced = true;
-    }
+    syncTimeToRp2040();
   }
 }
 

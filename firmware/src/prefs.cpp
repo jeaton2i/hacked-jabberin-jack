@@ -5,9 +5,9 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x4A4B3106; // "JK" + format version 6 (holidayName
-                                       // grew to fit a 2-line "Connie's|
-                                       // Birthday"-style name)
+constexpr uint32_t kMagic = 0x4A4B3108; // "JK" + format version 8
+                                       // (added the Clock face's 12/24-hour
+                                       // format flag)
 
 struct StoredPrefs {
   uint32_t magic;
@@ -20,25 +20,37 @@ struct StoredPrefs {
   char holidayName[kPrefsHolidayNameLength];
   uint32_t holidayMonth;
   uint32_t holidayDay;
+  char textLines[kPrefsTextLineCount][kPrefsTextLineLength];
+  uint32_t textFontIndex;
+  uint32_t clockUse12Hour;
   uint32_t checksum;
 };
+
+// Folds `len` bytes at `data` into `sum`, 4 at a time - `len` must be a
+// multiple of 4 (true of every char-array field this is used on).
+uint32_t foldBytes(uint32_t sum, const void *data, size_t len) {
+  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
+  for (size_t i = 0; i < len; i += 4) {
+    uint32_t chunk;
+    memcpy(&chunk, bytes + i, sizeof(chunk));
+    sum ^= chunk;
+  }
+  return sum;
+}
 
 uint32_t checksumOf(const StoredPrefs &prefs) {
   uint32_t sum = prefs.magic ^ prefs.enabledMask ^ prefs.rotateMs ^
                 prefs.brightnessPercent ^ prefs.randomOrder ^
                 prefs.esp32TxPin ^ prefs.esp32RxPin ^ prefs.holidayMonth ^
-                prefs.holidayDay;
-  // holidayName folded in 4 bytes at a time (kPrefsHolidayNameLength is a
-  // multiple of 4) - same "just XOR everything" scheme as every other
-  // field above, extended to a byte array.
+                prefs.holidayDay ^ prefs.textFontIndex ^
+                prefs.clockUse12Hour;
   static_assert(kPrefsHolidayNameLength % 4 == 0,
                "holidayName must be a multiple of 4 bytes for this loop");
-  const uint8_t *name =
-      reinterpret_cast<const uint8_t *>(prefs.holidayName);
-  for (size_t i = 0; i < kPrefsHolidayNameLength; i += 4) {
-    uint32_t chunk;
-    memcpy(&chunk, name + i, sizeof(chunk));
-    sum ^= chunk;
+  static_assert(kPrefsTextLineLength % 4 == 0,
+               "textLines rows must be a multiple of 4 bytes for this loop");
+  sum = foldBytes(sum, prefs.holidayName, kPrefsHolidayNameLength);
+  for (size_t i = 0; i < kPrefsTextLineCount; i++) {
+    sum = foldBytes(sum, prefs.textLines[i], kPrefsTextLineLength);
   }
   return sum;
 }
@@ -65,6 +77,12 @@ bool loadPrefs(Prefs &out) {
   out.holidayName[sizeof(out.holidayName) - 1] = '\0';
   out.holidayMonth = stored.holidayMonth;
   out.holidayDay = stored.holidayDay;
+  for (size_t i = 0; i < kPrefsTextLineCount; i++) {
+    memcpy(out.textLines[i], stored.textLines[i], sizeof(out.textLines[i]));
+    out.textLines[i][sizeof(out.textLines[i]) - 1] = '\0';
+  }
+  out.textFontIndex = stored.textFontIndex;
+  out.clockUse12Hour = stored.clockUse12Hour;
   return true;
 }
 
@@ -81,6 +99,13 @@ void savePrefs(const Prefs &prefs) {
   stored.holidayName[sizeof(stored.holidayName) - 1] = '\0';
   stored.holidayMonth = prefs.holidayMonth;
   stored.holidayDay = prefs.holidayDay;
+  for (size_t i = 0; i < kPrefsTextLineCount; i++) {
+    memcpy(stored.textLines[i], prefs.textLines[i],
+          sizeof(stored.textLines[i]));
+    stored.textLines[i][sizeof(stored.textLines[i]) - 1] = '\0';
+  }
+  stored.textFontIndex = prefs.textFontIndex;
+  stored.clockUse12Hour = prefs.clockUse12Hour;
   stored.checksum = checksumOf(stored);
 
   EEPROM.begin(sizeof(StoredPrefs));

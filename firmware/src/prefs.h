@@ -8,12 +8,20 @@
 // storage struct doesn't need to depend on a specific face's header.
 constexpr size_t kPrefsHolidayNameLength = 48;
 
+// Matches TextFace::kMaxLineLength/kMaxLines (see main.cpp's static_assert)
+// - duplicated as plain constants for the same reason as
+// kPrefsHolidayNameLength above: this low-level storage struct shouldn't
+// need to depend on a specific face's header.
+constexpr size_t kPrefsTextLineLength = 48;
+constexpr size_t kPrefsTextLineCount = 4;
+
 // Persisted configuration: which faces are enabled, the auto-rotate
 // interval, the candle brightness scale, the face advance order, the
-// ESP32 bridge link's GPIO pins, and the Countdown face's target holiday.
-// Stored in the RP2040's emulated EEPROM (a 4KB flash sector reserved by
-// the arduino-pico core, independent of any filesystem), so it survives
-// power cycles without needing a LittleFS partition.
+// ESP32 bridge link's GPIO pins, the Countdown face's target holiday, and
+// ConfigurableText's message/font. Stored in the RP2040's emulated EEPROM
+// (a 4KB flash sector reserved by the arduino-pico core, independent of
+// any filesystem), so it survives power cycles without needing a LittleFS
+// partition.
 //
 // Deliberately NOT included here: the Countdown face's *synced* date -
 // that's always transient (see CountdownFace's class comment on why the
@@ -29,6 +37,9 @@ struct Prefs {
   char holidayName[kPrefsHolidayNameLength];
   uint32_t holidayMonth;
   uint32_t holidayDay;
+  char textLines[kPrefsTextLineCount][kPrefsTextLineLength];
+  uint32_t textFontIndex; // index into main.cpp's kFontOptions
+  uint32_t clockUse12Hour; // 0 = 24-hour, 1 = 12-hour - see ClockFace
 };
 
 // Loads saved prefs from flash into `out`. Returns false (leaving `out`
