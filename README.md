@@ -47,18 +47,29 @@ Based on the work from pburgess:
 - Sensor support
   - Basic motion sensor to trigger effects
   - Camera-based sensor for human detection (look at person, trigger speech)
-- esp32 add-on board to make wifi controllable
-  - how should this interface?  serial, spi?
-  - serial will be limited to changing pre-stored modes
-  - can spi or something be used to be more dynamic?
+- esp32 add-on board to make wifi controllable — done, see
+  `docs/esp32-network-bridge.md` and `esp32-bridge/` (two interchangeable
+  link options: a wired UART for any classic ESP32, or USB host mode for
+  an ESP32-S2/S3/P4 plugged straight into the RP2040's own USB-C port).
+  Answering the interface question below: plain serial either way, reusing
+  the RP2040's existing text command protocol. That protocol already
+  exposes every runtime setting live (not just "pre-stored modes"), so SPI
+  wouldn't have bought any more dynamism, just more complexity on both
+  ends.
 
 
 ## Project Layout
 
 - `firmware/` — PlatformIO project (Arduino framework + Arduino_GFX) that
   runs on the RP2040 clone board.
+- `esp32-bridge/` — optional second PlatformIO project (ESP32) that bridges
+  the RP2040's serial console to a phone-friendly web UI over Wi-Fi, over
+  either a wired UART (`esp32dev` env) or USB host mode (`esp32s3_usbhost`
+  env). See `docs/esp32-network-bridge.md`.
 - `docs/rp2040-display-pinout.md` — working RP2040 display wiring map and
   hardware assumptions.
+- `docs/esp32-network-bridge.md` — ESP32 bridge wiring, Wi-Fi setup, and
+  its web UI/API.
 - `tools/convert_image_to_rgb565.py` — converts an image in `sample-images/`
   into a PROGMEM RGB565 header under `firmware/src/assets/` for use by
   `StaticImageFace`/`CandleLitImageFace`.
@@ -81,26 +92,38 @@ Based on the work from pburgess:
 
 ## Runtime Controls
 
-Faces can be advanced with a push button (GP13, wired active-low to GND) or
-over the serial console. On boot, the serial console prints the command list;
-send `help` any time to see it again.
+Three push buttons (wired active-low to GND) or the serial console both
+drive the same controls: **next face** (GP16), **pause/resume auto-rotate**
+(GP17), and **toggle random/in-order face advance** (GP18). Pressing the
+pause or order button briefly overlays a status message on the display
+confirming what it just switched to. On boot, the serial console prints the
+command list; send `help` any time to see it again.
 
 | Command       | Effect                                                    |
 |---------------|-------------------------------------------------------------|
 | *(enter)*     | Advance to the next enabled face                           |
 | `list`        | List every face with its on/off state, and the rotate interval |
+| `status`      | Print a machine-readable JSON snapshot of everything below (used by the ESP32 bridge, see below) |
 | `<n>`         | Toggle face `n` on/off (index from `list`)                 |
 | `text <l1>[\|l2\|l3\|l4]` | Set the `ConfigurableText` face's message (up to 4 lines, split on `\|`) and jump to it |
 | `font [name]` | List available fonts, or switch `ConfigurableText` to one (see below) |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `brightness [percent]` | Show, or set, the candle brightness (`100` = the flicker's original intensity; default is `115`) |
-| `save`        | Persist the current face selection + rotate interval + brightness to flash |
+| `order [random\|in-order]` | Show, or set, whether auto-rotate/next-face advances in list order or picks a random enabled face |
+| `esp32link [tx rx]` | Show, or set (as GP numbers), the pins the optional ESP32 bridge's UART is wired to - setting them saves the whole config and reboots to apply; see `docs/esp32-network-bridge.md` for which pins are actually valid |
+| `save`        | Persist the current face selection + rotate interval + brightness + order + ESP32 link pins to flash |
 | `load`        | Reload the saved config from flash                          |
 | `reset`       | Restore the compiled-in defaults (does not touch flash)     |
 | `debug`       | Toggle diagnostic logging for the animated-eye faces' motion (off by default) |
 
 Faces also auto-rotate on their own every `rotate` milliseconds (6s by
-default) among whichever faces are currently enabled.
+default) among whichever faces are currently enabled, in list order or
+randomly per `order`.
+
+An optional second board (an ESP32, see `esp32-bridge/` and
+`docs/esp32-network-bridge.md`) can link to the RP2040 - over a second UART,
+or a single USB-C cable in USB host mode on an ESP32-S2/S3/P4 - and relay
+this same command set to a phone-friendly web UI over Wi-Fi.
 
 `brightness` scales every flickering face together (`CandleFlicker` is
 shared by `TriangleFace`, the flickering text faces, and all the
@@ -143,11 +166,12 @@ reordering or adding/removing faces in `main.cpp`.
   the sclera (`EyeballLookAround`), and a set of static image faces (Jack
   Skellington, skull, commodore logo, WPI goat, robot, eyeball) - all
   available plain or candle-lit via a shared flicker helper.
-- Runtime config (which faces are enabled, the rotate interval) can be
-  changed and persisted to flash over the serial console — see "Runtime
-  Controls" above.
-- 3D-style shading, overlays, moving mouth/eyes, audio, sensors, and Wi-Fi
-  control remain future work.
+- Runtime config (which faces are enabled, the rotate interval, brightness,
+  and face order) can be changed and persisted to flash over the serial
+  console, physical buttons, or the optional ESP32 web UI — see "Runtime
+  Controls" above and `docs/esp32-network-bridge.md`.
+- 3D-style shading, overlays, moving mouth/eyes, audio, and sensors remain
+  future work.
 
 ## Firmware Previews
 

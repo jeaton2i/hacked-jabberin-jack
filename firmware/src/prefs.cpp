@@ -4,7 +4,7 @@
 
 namespace {
 
-constexpr uint32_t kMagic = 0x4A4B3103; // "JK" + format version 3
+constexpr uint32_t kMagic = 0x4A4B3104; // "JK" + format version 4
 
 struct StoredPrefs {
   uint32_t magic;
@@ -12,12 +12,15 @@ struct StoredPrefs {
   uint32_t rotateMs;
   uint32_t brightnessPercent;
   uint32_t randomOrder;
+  uint32_t esp32TxPin;
+  uint32_t esp32RxPin;
   uint32_t checksum;
 };
 
 uint32_t checksumOf(const StoredPrefs &prefs) {
   return prefs.magic ^ prefs.enabledMask ^ prefs.rotateMs ^
-         prefs.brightnessPercent ^ prefs.randomOrder;
+         prefs.brightnessPercent ^ prefs.randomOrder ^ prefs.esp32TxPin ^
+         prefs.esp32RxPin;
 }
 
 } // namespace
@@ -36,6 +39,8 @@ bool loadPrefs(Prefs &out) {
   out.rotateMs = stored.rotateMs;
   out.brightnessPercent = stored.brightnessPercent;
   out.randomOrder = stored.randomOrder;
+  out.esp32TxPin = stored.esp32TxPin;
+  out.esp32RxPin = stored.esp32RxPin;
   return true;
 }
 
@@ -46,6 +51,8 @@ void savePrefs(const Prefs &prefs) {
   stored.rotateMs = prefs.rotateMs;
   stored.brightnessPercent = prefs.brightnessPercent;
   stored.randomOrder = prefs.randomOrder;
+  stored.esp32TxPin = prefs.esp32TxPin;
+  stored.esp32RxPin = prefs.esp32RxPin;
   stored.checksum = checksumOf(stored);
 
   EEPROM.begin(sizeof(StoredPrefs));

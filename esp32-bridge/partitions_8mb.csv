@@ -1,0 +1,10 @@
+# ESP-IDF partition table for the esp32s3_usbhost env's ESP32-S3-DevKitC-1-N8
+# (8MB flash) - see sdkconfig.defaults' CONFIG_PARTITION_TABLE_CUSTOM.
+# The IDF's default "single factory app" table sizes its app partition at
+# 1MB regardless of actual flash size, which this firmware (WiFiManager +
+# the USB host/CDC-ACM stack) already fills to ~90% of - this gives it
+# 4MB instead, comfortably inside the board's real 8MB.
+# Name,     Type, SubType,  Offset,   Size
+nvs,        data, nvs,      0x9000,   0x6000,
+phy_init,   data, phy,      0xf000,   0x1000,
+factory,    app,  factory,  0x10000,  4M,

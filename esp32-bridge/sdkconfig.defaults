@@ -1,0 +1,16 @@
+# Required by the Arduino-as-ESP-IDF-component build (esp32s3_usbhost env) -
+# arduino-esp32's CMakeLists.txt hard-fails configure without this.
+CONFIG_FREERTOS_HZ=1000
+
+# Matches the ESP32-S3-DevKitC-1-N8 board's actual 8MB flash chip - without
+# this esptool warns "Flash memory size mismatch" every build.
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# The IDF's default "single factory app" partition table sizes the app
+# partition at 1MB regardless of actual flash size - this firmware
+# (WiFiManager + the USB host/CDC-ACM stack) already fills that to ~90%.
+# partitions_8mb.csv gives it a 4MB app partition instead, comfortably
+# inside the board's real 8MB.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions_8mb.csv"

@@ -1,0 +1,7 @@
+.pio/
+.vscode/
+compile_commands.json
+
+# Generated per-environment ESP-IDF config (esp32s3_usbhost env) - derived
+# from sdkconfig.defaults, which IS tracked.
+sdkconfig.esp32s3_usbhost

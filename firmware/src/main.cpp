@@ -42,6 +42,37 @@ constexpr int8_t PIN_PAUSE_BUTTON = 17;
 constexpr int8_t PIN_ORDER_BUTTON = 18;
 constexpr unsigned long kButtonDebounceMs = 200;
 
+// UART1 link to an optional ESP32 Wi-Fi bridge board (see
+// docs/esp32-network-bridge.md for wiring + the bridge's own firmware).
+// Left unconnected, this is just an idle UART - nothing reads it unless a
+// bridge is actually wired up. The actual pins used are runtime-configurable
+// (see esp32TxPin/esp32RxPin and the "esp32link" command below) - these are
+// only the compiled-in defaults, used until "load" restores a saved config.
+constexpr int8_t kDefaultPinEsp32Tx = 20; // -> ESP32 RX
+constexpr int8_t kDefaultPinEsp32Rx = 21; // <- ESP32 TX
+
+// The RP2040's UART1 peripheral can only be mapped to specific GPIOs: the
+// SoC's fixed pin-function mux offers it in groups of 4 consecutive GPIOs
+// (TX, RX, CTS, RTS in that order) - {4,5,6,7}, {12,13,14,15},
+// {20,21,22,23}, {28,29,...} - so only the first two pins of each group
+// are ever valid TX/RX choices; e.g. GP22 is UART1's CTS pin, not a second
+// RX option, and GP27 belongs to UART0, not UART1, at all. Given GP0-15
+// are taken by the display bus and GP16-18 by the buttons, GP20/GP21 (the
+// defaults) end up as the only genuinely free legal pair on this board -
+// GP28/29 would also be legal, but GP29 is conventionally reserved for
+// VSYS sensing on official Pico boards. Getting this wrong doesn't just
+// fail quietly: requesting an invalid UART1 pin from the SDK reliably
+// hard-faults the whole chip before USB even finishes enumerating.
+bool isValidUart1Pins(int8_t tx, int8_t rx) {
+  constexpr int8_t kValidTx[] = {4, 12, 20, 28};
+  for (int8_t validTx : kValidTx) {
+    if (tx == validTx && rx == validTx + 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Ambient WS2812 strip, powered from its own switched 5V rail (not the
 // Pico's) - only the data line comes from a GPIO. Adjust to match however
 // many LEDs are actually wired up.
@@ -252,6 +283,13 @@ unsigned long savedRotateMs = kDefaultAutoRotateMs;
 // advance to a random enabled face each time.
 bool randomOrder = false;
 
+// Runtime-configurable ESP32 bridge link pins (see the "esp32link"
+// command) - deliberately not compile-time constants, since getting these
+// right in practice means matching whatever's actually been wired up,
+// which is exactly the kind of thing worth changing without a reflash.
+int8_t esp32TxPin = kDefaultPinEsp32Tx;
+int8_t esp32RxPin = kDefaultPinEsp32Rx;
+
 unsigned long lastAutoRotateMs = 0;
 
 // How long a button-press status message (see showStatusMessage) stays on
@@ -289,8 +327,20 @@ bool buttonPressed(DebouncedButton &button, unsigned long now) {
 
 // Long enough for "text " plus two full TextFace::kMaxLineLength lines and
 // the "|" that separates them.
-char serialLine[104];
-uint8_t serialLineLength = 0;
+constexpr size_t kSerialLineCapacity = 104;
+struct SerialPort {
+  Stream *stream;
+  char line[kSerialLineCapacity];
+  uint8_t length = 0;
+};
+SerialPort usbPort{&Serial};
+SerialPort espPort{&Serial2};
+
+// Whichever port's line is currently being handled - sets where
+// handleSerialCommand()/printFaceList()/printHelp()/printFontList() send
+// their replies, so a command from the ESP32 bridge gets its reply over
+// UART1 instead of USB.
+Stream *cmdOut = &Serial;
 
 uint32_t currentEnabledMask() {
   uint32_t mask = 0;
@@ -308,10 +358,27 @@ void applyEnabledMask(uint32_t mask) {
   }
 }
 
+// Initializes the ESP32 bridge UART using the current esp32TxPin/
+// esp32RxPin. Called exactly once, from setup(), after esp32TxPin/RxPin
+// have their final boot-time values (compiled-in defaults, then possibly
+// overridden by loadPrefs()). Deliberately NOT called again afterward to
+// apply a later change (see the "esp32link" command) - tearing down and
+// restarting this UART mid-session (Serial2.end() + setTX/setRX + begin())
+// reliably hangs the RP2040 on this core, for reasons not yet root-caused.
+// Changing esp32TxPin/esp32RxPin at runtime therefore only takes effect
+// after the next power cycle, not immediately.
+void beginEsp32Link() {
+  Serial2.setTX(esp32TxPin);
+  Serial2.setRX(esp32RxPin);
+  Serial2.begin(115200);
+}
+
 void resetToDefaults() {
   memcpy(faceEnabled, kDefaultFaceEnabled, sizeof(faceEnabled));
   autoRotateMs = kDefaultAutoRotateMs;
   randomOrder = false;
+  esp32TxPin = kDefaultPinEsp32Tx;
+  esp32RxPin = kDefaultPinEsp32Rx;
   CandleFlicker::setBrightness(kDefaultBrightnessPercent / 100.0f);
 }
 
@@ -424,44 +491,101 @@ void updateLeds() {
 
 void printFaceList() {
   for (size_t i = 0; i < kFaceCount; i++) {
-    Serial.print(i);
-    Serial.print(": ");
-    Serial.print(faceNames[i]);
-    Serial.println(faceEnabled[i] ? " [on]" : " [off]");
+    cmdOut->print(i);
+    cmdOut->print(": ");
+    cmdOut->print(faceNames[i]);
+    cmdOut->println(faceEnabled[i] ? " [on]" : " [off]");
   }
-  Serial.print("Rotate interval: ");
+  cmdOut->print("Rotate interval: ");
   if (autoRotateMs == 0) {
-    Serial.println("off");
+    cmdOut->println("off");
   } else {
-    Serial.print(autoRotateMs);
-    Serial.println(" ms");
+    cmdOut->print(autoRotateMs);
+    cmdOut->println(" ms");
   }
+}
+
+// Machine-readable snapshot of everything the "list"/"brightness"/"order"/
+// "font" commands otherwise report only in human-oriented text - used by the
+// optional ESP32 bridge (see docs/esp32-network-bridge.md) so it doesn't
+// have to parse those instead. statusMessageFace is deliberately left out
+// of "faces": it's an internal overlay, not something remote UIs should be
+// able to toggle into the rotation.
+void printStatusJson() {
+  cmdOut->print("{\"currentFace\":");
+  cmdOut->print(currentFace);
+  cmdOut->print(",\"rotateMs\":");
+  cmdOut->print(autoRotateMs);
+  cmdOut->print(",\"brightnessPercent\":");
+  cmdOut->print((int)(CandleFlicker::brightness() * 100.0f + 0.5f));
+  cmdOut->print(",\"order\":\"");
+  cmdOut->print(randomOrder ? "random" : "in-order");
+  cmdOut->print("\",\"font\":\"");
+  cmdOut->print(kFontOptions[currentFontIndex].name);
+  cmdOut->print("\",\"debugLogging\":");
+  cmdOut->print(EyeLookMotion::debugLogging() ? "true" : "false");
+  cmdOut->print(",\"esp32TxPin\":");
+  cmdOut->print(esp32TxPin);
+  cmdOut->print(",\"esp32RxPin\":");
+  cmdOut->print(esp32RxPin);
+
+  cmdOut->print(",\"fonts\":[");
+  for (size_t i = 0; i < kFontOptionCount; i++) {
+    if (i > 0) {
+      cmdOut->print(",");
+    }
+    cmdOut->print("\"");
+    cmdOut->print(kFontOptions[i].name);
+    cmdOut->print("\"");
+  }
+
+  cmdOut->print("],\"faces\":[");
+  bool first = true;
+  for (size_t i = 0; i < kFaceCount; i++) {
+    if (i == kStatusMessageFaceIndex) {
+      continue;
+    }
+    if (!first) {
+      cmdOut->print(",");
+    }
+    first = false;
+    cmdOut->print("{\"i\":");
+    cmdOut->print(i);
+    cmdOut->print(",\"name\":\"");
+    cmdOut->print(faceNames[i]);
+    cmdOut->print("\",\"enabled\":");
+    cmdOut->print(faceEnabled[i] ? "true" : "false");
+    cmdOut->print("}");
+  }
+  cmdOut->println("]}");
 }
 
 void printHelp() {
-  Serial.println("Serial commands:");
-  Serial.println("  <enter>     - advance to next enabled face");
-  Serial.println("  list        - list faces with on/off state + rotate interval");
-  Serial.println("  <n>         - toggle face n on/off");
-  Serial.println("  text <l1>[|l2|l3|l4] - set ConfigurableText (up to 4 lines) and show it");
-  Serial.println("  font [name] - list/set ConfigurableText's font (see 'font' with no name)");
-  Serial.println("  rotate <ms> - set auto-rotate interval (0 disables)");
-  Serial.println("  brightness [percent] - show/set candle brightness (100=original)");
-  Serial.println("  order [random|in-order] - show/set face advance order");
-  Serial.println("  save        - save current faces + rotate interval + brightness + order to flash");
-  Serial.println("  load        - reload saved config from flash");
-  Serial.println("  reset       - restore compiled-in defaults (not saved)");
-  Serial.println("  debug       - toggle EyeLook motion logging (off by default)");
-  Serial.println("  help        - show this message");
-  Serial.println("Buttons: next (GP16), pause/play rotate (GP17), toggle random/in-order (GP18)");
+  cmdOut->println("Serial commands:");
+  cmdOut->println("  <enter>     - advance to next enabled face");
+  cmdOut->println("  list        - list faces with on/off state + rotate interval");
+  cmdOut->println("  status      - print machine-readable JSON status (see printStatusJson)");
+  cmdOut->println("  <n>         - toggle face n on/off");
+  cmdOut->println("  text <l1>[|l2|l3|l4] - set ConfigurableText (up to 4 lines) and show it");
+  cmdOut->println("  font [name] - list/set ConfigurableText's font (see 'font' with no name)");
+  cmdOut->println("  rotate <ms> - set auto-rotate interval (0 disables)");
+  cmdOut->println("  brightness [percent] - show/set candle brightness (100=original)");
+  cmdOut->println("  order [random|in-order] - show/set face advance order");
+  cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
+  cmdOut->println("  save        - save current faces + rotate interval + brightness + order + ESP32 link pins to flash");
+  cmdOut->println("  load        - reload saved config from flash");
+  cmdOut->println("  reset       - restore compiled-in defaults (not saved)");
+  cmdOut->println("  debug       - toggle EyeLook motion logging (off by default)");
+  cmdOut->println("  help        - show this message");
+  cmdOut->println("Buttons: next (GP16), pause/play rotate (GP17), toggle random/in-order (GP18)");
 }
 
 void printFontList(size_t currentFontIndex) {
-  Serial.println("Available fonts:");
+  cmdOut->println("Available fonts:");
   for (size_t i = 0; i < kFontOptionCount; i++) {
-    Serial.print("  ");
-    Serial.print(kFontOptions[i].name);
-    Serial.println(i == currentFontIndex ? " (current)" : "");
+    cmdOut->print("  ");
+    cmdOut->print(kFontOptions[i].name);
+    cmdOut->println(i == currentFontIndex ? " (current)" : "");
   }
 }
 
@@ -476,10 +600,10 @@ const char *skipSpaces(const char *line) {
 // Serial UI: an empty line (just press enter) or any unrecognized input
 // advances to the next enabled face (keeps the old "mash a key"
 // convenience); "list"/"help" print info; a bare number toggles that face's
-// on/off state; "rotate", "brightness", "order", "save", "load", and
-// "reset" manage persisted config; "text" sets ConfigurableTextFace's message; "font"
-// lists/sets its font; "debug" toggles EyeLookMotion's diagnostic logging
-// (see printHelp for details).
+// on/off state; "rotate", "brightness", "order", "esp32link", "save",
+// "load", and "reset" manage persisted config; "text" sets
+// ConfigurableTextFace's message; "font" lists/sets its font; "debug"
+// toggles EyeLookMotion's diagnostic logging (see printHelp for details).
 void handleSerialCommand(const char *line) {
   if (line[0] == '\0') {
     advanceFace();
@@ -489,16 +613,24 @@ void handleSerialCommand(const char *line) {
     printFaceList();
     return;
   }
+  if (strcmp(line, "status") == 0) {
+    printStatusJson();
+    return;
+  }
   if (strcmp(line, "help") == 0) {
     printHelp();
     return;
   }
   if (strcmp(line, "save") == 0) {
-    Prefs prefs{currentEnabledMask(), autoRotateMs,
+    Prefs prefs{currentEnabledMask(),
+               autoRotateMs,
                (uint32_t)(CandleFlicker::brightness() * 100.0f),
-               (uint32_t)(randomOrder ? 1 : 0)};
+               (uint32_t)(randomOrder ? 1 : 0),
+               (uint32_t)esp32TxPin,
+               (uint32_t)esp32RxPin};
     savePrefs(prefs);
-    Serial.println("Saved current faces + rotate interval + brightness + order to flash");
+    cmdOut->println("Saved current faces + rotate interval + brightness + "
+                    "order + ESP32 link pins to flash");
     return;
   }
   if (strcmp(line, "load") == 0) {
@@ -508,21 +640,32 @@ void handleSerialCommand(const char *line) {
       autoRotateMs = prefs.rotateMs;
       CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
       randomOrder = prefs.randomOrder != 0;
-      Serial.println("Loaded saved config from flash");
+      if (isValidUart1Pins((int8_t)prefs.esp32TxPin,
+                          (int8_t)prefs.esp32RxPin)) {
+        esp32TxPin = (int8_t)prefs.esp32TxPin;
+        esp32RxPin = (int8_t)prefs.esp32RxPin;
+      } else {
+        esp32TxPin = kDefaultPinEsp32Tx;
+        esp32RxPin = kDefaultPinEsp32Rx;
+        cmdOut->println("Saved ESP32 link pins aren't a valid UART1 pair - "
+                        "ignoring, defaults staged instead");
+      }
+      cmdOut->println("Loaded saved config from flash (ESP32 link pins "
+                      "take effect after the next power cycle)");
     } else {
-      Serial.println("No valid saved config in flash");
+      cmdOut->println("No valid saved config in flash");
     }
     return;
   }
   if (strcmp(line, "reset") == 0) {
     resetToDefaults();
-    Serial.println("Restored compiled-in defaults (not saved)");
+    cmdOut->println("Restored compiled-in defaults (not saved)");
     return;
   }
   if (strcmp(line, "debug") == 0) {
     bool enabled = !EyeLookMotion::debugLogging();
     EyeLookMotion::setDebugLogging(enabled);
-    Serial.println(enabled ? "EyeLook motion logging: on"
+    cmdOut->println(enabled ? "EyeLook motion logging: on"
                            : "EyeLook motion logging: off");
     return;
   }
@@ -530,28 +673,28 @@ void handleSerialCommand(const char *line) {
       (line[10] == '\0' || line[10] == ' ')) {
     const char *arg = skipSpaces(line + 10);
     if (arg[0] == '\0') {
-      Serial.print("Brightness: ");
-      Serial.print((int)(CandleFlicker::brightness() * 100.0f + 0.5f));
-      Serial.println("%");
+      cmdOut->print("Brightness: ");
+      cmdOut->print((int)(CandleFlicker::brightness() * 100.0f + 0.5f));
+      cmdOut->println("%");
       return;
     }
     char *end;
     long percent = strtol(arg, &end, 10);
     if (end != arg && *end == '\0' && percent >= 0) {
       CandleFlicker::setBrightness(percent / 100.0f);
-      Serial.print("Brightness set to ");
-      Serial.print(percent);
-      Serial.println("%");
+      cmdOut->print("Brightness set to ");
+      cmdOut->print(percent);
+      cmdOut->println("%");
     } else {
-      Serial.println("Usage: brightness <percent>");
+      cmdOut->println("Usage: brightness <percent>");
     }
     return;
   }
   if (strncmp(line, "order", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
     const char *arg = skipSpaces(line + 5);
     if (arg[0] == '\0') {
-      Serial.print("Face order: ");
-      Serial.println(randomOrder ? "random" : "in-order");
+      cmdOut->print("Face order: ");
+      cmdOut->println(randomOrder ? "random" : "in-order");
       return;
     }
     if (strcmp(arg, "random") == 0) {
@@ -559,23 +702,68 @@ void handleSerialCommand(const char *line) {
     } else if (strcmp(arg, "in-order") == 0) {
       randomOrder = false;
     } else {
-      Serial.println("Usage: order [random|in-order]");
+      cmdOut->println("Usage: order [random|in-order]");
       return;
     }
-    Serial.print("Face order set to: ");
-    Serial.println(randomOrder ? "random" : "in-order");
+    cmdOut->print("Face order set to: ");
+    cmdOut->println(randomOrder ? "random" : "in-order");
+    return;
+  }
+  if (strncmp(line, "esp32link", 9) == 0 &&
+      (line[9] == '\0' || line[9] == ' ')) {
+    const char *arg = skipSpaces(line + 9);
+    if (arg[0] == '\0') {
+      cmdOut->print("ESP32 link pins: tx=");
+      cmdOut->print(esp32TxPin);
+      cmdOut->print(" rx=");
+      cmdOut->println(esp32RxPin);
+      return;
+    }
+    char *end;
+    long tx = strtol(arg, &end, 10);
+    const char *rxArg = (end == arg) ? end : skipSpaces(end);
+    long rx = strtol(rxArg, &end, 10);
+    if (end == rxArg || tx < 0 || tx > 28 || rx < 0 || rx > 28 ||
+        !isValidUart1Pins((int8_t)tx, (int8_t)rx)) {
+      cmdOut->println("Usage: esp32link <tx> <rx> - must be one of these "
+                      "pairs (RP2040 UART1's only valid TX/RX pin "
+                      "choices): 4 5, 12 13, 20 21, 28 29");
+      return;
+    }
+    esp32TxPin = (int8_t)tx;
+    esp32RxPin = (int8_t)rx;
+    // Changing this UART's pins only actually takes effect on the next
+    // beginEsp32Link() call, which only ever runs once at boot (see its own
+    // comment) - so unlike every other setting here, this one is pointless
+    // without also saving *and* rebooting, or the new pins would just be
+    // discarded the moment anything else reboots the board.
+    Prefs prefs{currentEnabledMask(),
+               autoRotateMs,
+               (uint32_t)(CandleFlicker::brightness() * 100.0f),
+               (uint32_t)(randomOrder ? 1 : 0),
+               (uint32_t)esp32TxPin,
+               (uint32_t)esp32RxPin};
+    savePrefs(prefs);
+    cmdOut->print("ESP32 link pins set to: tx=");
+    cmdOut->print(tx);
+    cmdOut->print(" rx=");
+    cmdOut->print(rx);
+    cmdOut->println(" - saved current config and rebooting to apply...");
+    cmdOut->flush();
+    delay(50);
+    rp2040.reboot();
     return;
   }
   if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
     const char *arg = skipSpaces(line + 4);
     if (arg[0] == '\0') {
-      Serial.println("Usage: text <line1>[|line2[|line3[|line4]]]");
+      cmdOut->println("Usage: text <line1>[|line2[|line3[|line4]]]");
       return;
     }
-    // Copied out (rather than split in place) since `line`/`arg` alias
-    // serialLine, and setText()'s arguments all need to stay valid for
-    // the duration of the call.
-    char buf[sizeof(serialLine)];
+    // Copied out (rather than split in place) since `line`/`arg` alias the
+    // owning SerialPort's line buffer, and setText()'s arguments all need
+    // to stay valid for the duration of the call.
+    char buf[kSerialLineCapacity];
     strncpy(buf, arg, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
 
@@ -598,14 +786,14 @@ void handleSerialCommand(const char *line) {
     // than leaving it to show up whenever auto-rotate/advance next
     // happens to reach it.
     selectFace(kConfigurableTextFaceIndex);
-    Serial.print("ConfigurableText set to: ");
+    cmdOut->print("ConfigurableText set to: ");
     for (uint8_t i = 0; i < lineCount; i++) {
       if (i > 0) {
-        Serial.print(" / ");
+        cmdOut->print(" / ");
       }
-      Serial.print(lines[i]);
+      cmdOut->print(lines[i]);
     }
-    Serial.println();
+    cmdOut->println();
     return;
   }
   if (strncmp(line, "font", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
@@ -620,13 +808,13 @@ void handleSerialCommand(const char *line) {
         configurableTextFace.setFont(kFontOptions[i].font,
                                      kFontOptions[i].smooth);
         selectFace(kConfigurableTextFaceIndex);
-        Serial.print("ConfigurableText font set to: ");
-        Serial.println(kFontOptions[i].name);
+        cmdOut->print("ConfigurableText font set to: ");
+        cmdOut->println(kFontOptions[i].name);
         return;
       }
     }
-    Serial.print("Unknown font: ");
-    Serial.println(arg);
+    cmdOut->print("Unknown font: ");
+    cmdOut->println(arg);
     printFontList(currentFontIndex);
     return;
   }
@@ -637,15 +825,15 @@ void handleSerialCommand(const char *line) {
     if (end != arg && *end == '\0' && ms >= 0) {
       autoRotateMs = (unsigned long)ms;
       lastAutoRotateMs = millis();
-      Serial.print("Rotate interval set to ");
+      cmdOut->print("Rotate interval set to ");
       if (autoRotateMs == 0) {
-        Serial.println("off");
+        cmdOut->println("off");
       } else {
-        Serial.print(autoRotateMs);
-        Serial.println(" ms");
+        cmdOut->print(autoRotateMs);
+        cmdOut->println(" ms");
       }
     } else {
-      Serial.println("Usage: rotate <ms>");
+      cmdOut->println("Usage: rotate <ms>");
     }
     return;
   }
@@ -654,27 +842,33 @@ void handleSerialCommand(const char *line) {
   if (end != line && *end == '\0' && index >= 0 &&
       (size_t)index < kFaceCount) {
     faceEnabled[index] = !faceEnabled[index];
-    Serial.print(faceNames[index]);
-    Serial.println(faceEnabled[index] ? ": enabled" : ": disabled");
+    cmdOut->print(faceNames[index]);
+    cmdOut->println(faceEnabled[index] ? ": enabled" : ": disabled");
     return;
   }
   advanceFace();
 }
 
-void pollSerial() {
-  while (Serial.available()) {
-    char c = Serial.read();
+void pollSerialPort(SerialPort &port) {
+  while (port.stream->available()) {
+    char c = port.stream->read();
     if (c == '\r') {
       continue;
     }
     if (c == '\n') {
-      serialLine[serialLineLength] = '\0';
-      handleSerialCommand(serialLine);
-      serialLineLength = 0;
-    } else if (serialLineLength < sizeof(serialLine) - 1) {
-      serialLine[serialLineLength++] = c;
+      port.line[port.length] = '\0';
+      cmdOut = port.stream;
+      handleSerialCommand(port.line);
+      port.length = 0;
+    } else if (port.length < sizeof(port.line) - 1) {
+      port.line[port.length++] = c;
     }
   }
+}
+
+void pollSerial() {
+  pollSerialPort(usbPort);
+  pollSerialPort(espPort);
 }
 
 void setup() {
@@ -688,10 +882,25 @@ void setup() {
     autoRotateMs = prefs.rotateMs;
     CandleFlicker::setBrightness(prefs.brightnessPercent / 100.0f);
     randomOrder = prefs.randomOrder != 0;
+    // Validated before ever reaching beginEsp32Link() below: requesting an
+    // invalid UART1 pin from the SDK hard-faults the whole chip before USB
+    // even finishes enumerating, which would otherwise turn one bad saved
+    // value into a boot loop with no way to reach it to fix it again.
+    if (isValidUart1Pins((int8_t)prefs.esp32TxPin, (int8_t)prefs.esp32RxPin)) {
+      esp32TxPin = (int8_t)prefs.esp32TxPin;
+      esp32RxPin = (int8_t)prefs.esp32RxPin;
+    } else {
+      Serial.println("Saved ESP32 link pins aren't a valid UART1 pair; "
+                     "using compiled-in defaults instead");
+    }
     Serial.println("Loaded saved config from flash");
   } else {
     Serial.println("No saved config in flash; using compiled-in defaults");
   }
+  // Brings up the ESP32 bridge UART - exactly once, now that esp32TxPin/
+  // esp32RxPin have their final boot-time values (see beginEsp32Link()'s
+  // comment for why this can't just be re-called later to apply a change).
+  beginEsp32Link();
   printHelp();
 
   randomSeed(micros());
