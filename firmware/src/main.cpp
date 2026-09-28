@@ -98,6 +98,7 @@ CandleFlicker ledFlicker;
 Adafruit_NeoPixel leds(kLedCount, PIN_LED_DATA, NEO_GRB + NEO_KHZ800);
 
 TriangleFace triangleFace;
+TriangleFace triangleFaceAnimated(/*animated=*/true);
 TestPatternFace testPatternFace;
 CheckerboardFace checkerboardFace;
 BullseyeFace bullseyeFace;
@@ -178,6 +179,12 @@ Face *faces[] = {&triangleFace,
                  &robotLookCandleFace,
                  &happyHalloweenFace,
                  &booFace,
+                 // Placed here (not next to &triangleFace above) so every
+                 // other face's saved-config bit position stays unchanged -
+                 // only configurableTextFace/statusMessageFace shift, and
+                 // they recompute their own fixed index from kFaceCount so
+                 // that's harmless.
+                 &triangleFaceAnimated,
                  &configurableTextFace,
                  &statusMessageFace};
 const char *faceNames[] = {"TriangleFace",
@@ -206,6 +213,7 @@ const char *faceNames[] = {"TriangleFace",
                            "RobotLookAroundCandleLit",
                            "HappyHalloweenText",
                            "BooText",
+                           "TriangleFaceAnimated",
                            "ConfigurableText",
                            "StatusMessage"};
 constexpr size_t kFaceCount = sizeof(faces) / sizeof(faces[0]);
@@ -247,6 +255,8 @@ const bool kDefaultFaceEnabled[kFaceCount] = {
     true,  // RobotLookAroundCandleLit
     true, // HappyHalloweenText
     true, // BooText
+    false, // TriangleFaceAnimated - opt-in, so the mouth doesn't suddenly
+           // start flapping in rotation until asked for
     true, // ConfigurableText
     false // StatusMessage
   };

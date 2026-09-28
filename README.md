@@ -31,7 +31,12 @@ Based on the work from pburgess:
     interior, rather than filled flat (see `kWallWidthPx`'s comment in
     `firmware/src/faces/triangle_face.cpp`)
 - Dynamic animated pumpkin face
-  - Moving mouth for future lip sync
+  - Moving mouth for future lip sync — started: `TriangleFaceAnimated`
+    flaps the mouth open/closed in a procedural, irregular pattern (see
+    `pickNewJawTarget()`/`updateJaw()` in
+    `firmware/src/faces/triangle_face.cpp`), not yet driven by any real
+    audio - `TriangleFace` (the plain, non-animated face) is unchanged and
+    still registered separately
   - Moving eyes/nose
 - Special effects/overlays
   - Blood dripping

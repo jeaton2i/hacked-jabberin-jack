@@ -1,9 +1,27 @@
 #include "triangle_face.h"
 
+#include <Arduino.h>
 #include <math.h>
 
 namespace {
 constexpr float PI_VALUE = 3.14159265359f;
+
+// Procedural "talking" jaw motion (see TriangleFace::updateJaw()): picks a
+// new random openness target at irregular intervals and eases toward it,
+// same "random target + hold + time-based ease" idiom as
+// EyeLookMotion::update() uses for the animated eye's glance - kept much
+// snappier/shorter here, since a jaw flapping through syllables moves much
+// faster than an eye deciding where to glance next.
+constexpr float kJawMinOpenness = 0.05f;
+constexpr float kJawMaxOpenness = 1.0f;
+constexpr float kJawEasingTimeConstantMs = 55.0f;
+constexpr unsigned long kJawMinHoldMs = 70;
+constexpr unsigned long kJawMaxHoldMs = 200;
+// Occasionally holds near-closed for a beat, like a pause between words,
+// instead of constant chatter.
+constexpr unsigned long kJawPauseMinMs = 150;
+constexpr unsigned long kJawPauseMaxMs = 380;
+constexpr int kJawPausePercentChance = 15;
 
 // Generously covers the mouth's bounding box (~141x43 px on the 220x176
 // panel) with headroom.
@@ -262,9 +280,48 @@ void drawGradedTriangle(Arduino_GFX *gfx, int16_t x0, int16_t y0, int16_t x1,
 
 } // namespace
 
-void TriangleFace::begin(Arduino_GFX *gfx) { gfx->fillScreen(RGB565_BLACK); }
+void TriangleFace::begin(Arduino_GFX *gfx) {
+  gfx->fillScreen(RGB565_BLACK);
+  randomSeed(micros());
+  _jawOpenness = kJawMaxOpenness;
+  _jawTarget = kJawMaxOpenness;
+  unsigned long now = millis();
+  _jawHoldUntilMillis = now;
+  _lastJawUpdateMillis = now;
+}
 
-void TriangleFace::update() { _flicker.update(); }
+void TriangleFace::update() {
+  _flicker.update();
+  if (_animated) {
+    updateJaw();
+  }
+}
+
+void TriangleFace::pickNewJawTarget() {
+  unsigned long now = millis();
+  bool pause = random(0, 100) < kJawPausePercentChance;
+  if (pause) {
+    _jawTarget = kJawMinOpenness;
+    _jawHoldUntilMillis = now + random(kJawPauseMinMs, kJawPauseMaxMs + 1);
+  } else {
+    float span = kJawMaxOpenness - kJawMinOpenness;
+    _jawTarget = kJawMinOpenness + span * (random(0, 101) / 100.0f);
+    _jawHoldUntilMillis = now + random(kJawMinHoldMs, kJawMaxHoldMs + 1);
+  }
+}
+
+void TriangleFace::updateJaw() {
+  unsigned long now = millis();
+  unsigned long elapsedMs = now - _lastJawUpdateMillis;
+  _lastJawUpdateMillis = now;
+
+  if ((long)(now - _jawHoldUntilMillis) >= 0) {
+    pickNewJawTarget();
+  }
+
+  float alpha = 1.0f - expf(-(float)elapsedMs / kJawEasingTimeConstantMs);
+  _jawOpenness += (_jawTarget - _jawOpenness) * alpha;
+}
 
 void TriangleFace::draw(Arduino_GFX *gfx) {
   int16_t w = gfx->width();
@@ -284,7 +341,15 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
   int16_t mouthLeft = w * 0.18;
   int16_t mouthRight = w * 0.82;
   int16_t mouthUpperDepth = h * 0.10;
-  int16_t mouthLowerDepth = h * 0.24;
+  // The mouth's upper boundary stays put; only its lower boundary moves
+  // with the jaw (see _jawOpenness), like a hinged jaw dropping open - it
+  // always stays below mouthUpperDepth so the crescent (upperY..lowerY)
+  // never inverts into an empty/negative span at the resting, near-closed
+  // end of the animation.
+  int16_t mouthMaxLowerDepth = h * 0.24;
+  int16_t mouthLowerDepth =
+      mouthUpperDepth +
+      (int16_t)((mouthMaxLowerDepth - mouthUpperDepth) * _jawOpenness);
 
   drawGradedTriangle(gfx, w / 2 - eyeOffsetX, eyeY - eyeSize,
                      w / 2 - eyeOffsetX - eyeSize, eyeY + eyeSize,
@@ -298,8 +363,15 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
 
   // The mouth arc and teeth are composed into this buffer and blitted to
   // the panel in one shot (see fillTriangleInBuffer above for why).
+  //
+  // mouthHeight is always the *maximum* possible lower depth, not the
+  // current (jaw-animated) mouthLowerDepth: draw16bitRGBBitmap only
+  // overwrites exactly the rectangle it's given, so when the jaw closes
+  // after a wider-open frame, blitting a shrinking rectangle would leave
+  // that previous frame's lower rows on the panel untouched instead of
+  // clearing them.
   int16_t mouthWidth = mouthRight - mouthLeft + 1;
-  int16_t mouthHeight = mouthLowerDepth + 1;
+  int16_t mouthHeight = mouthMaxLowerDepth + 1;
   static uint16_t mouthBuffer[kMouthBufferWidth * kMouthBufferHeight];
 
   for (int16_t i = 0; i < mouthWidth * mouthHeight; i++) {
