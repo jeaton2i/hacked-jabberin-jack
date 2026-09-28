@@ -106,7 +106,10 @@ void CountdownFace::refreshText() {
     _textFace.setText("Tomorrow is", nameLine1, nameLine2);
   } else {
     char line1[24];
-    snprintf(line1, sizeof(line1), "%ld days until", (long)days);
+    // "to" rather than "until" - shorter, so TextFace's auto-sizing (fit
+    // the longest line within the visible circular area) doesn't shrink
+    // the whole thing down more than it needs to for one word.
+    snprintf(line1, sizeof(line1), "%ld days to", (long)days);
     _textFace.setText(line1, nameLine1, nameLine2);
   }
 }

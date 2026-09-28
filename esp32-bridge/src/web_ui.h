@@ -460,7 +460,7 @@ function applyStatus(status) {
   } else if (countdown.daysUntil === 1) {
     countdownReadout.textContent = "Tomorrow is " + holidayDisplayName + "!";
   } else {
-    countdownReadout.textContent = countdown.daysUntil + " days until " + holidayDisplayName;
+    countdownReadout.textContent = countdown.daysUntil + " days to " + holidayDisplayName;
   }
 }
 
