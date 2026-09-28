@@ -29,10 +29,19 @@ constexpr int16_t kFeatureBufferSize = 80;
 //      face, where it meets the glow) - still a solid, clearly-flesh-toned
 //      band rather than a thin highlight.
 //   2. The glowing interior beyond that band, fading from that same
-//      wallColor into hotColor over kInnerGlowBandFraction of whatever
-//      inradius remains inside the wall - saturating quickly so most of
-//      the interior reads as a uniform hot glow, like looking through the
-//      cut at a light source.
+//      wallColor into the candle's own actual color over
+//      kInnerGlowBandFraction of whatever inradius remains inside the
+//      wall - saturating quickly so most of the interior reads as a
+//      uniform hot glow, like looking through the cut at a light source.
+//      The interior's "hot" endpoint is deliberately the real,
+//      unmodified CandleFlicker color rather than some synthesized
+//      brighter/whiter tone - an earlier attempt at a separate "hot"
+//      color (blending green toward a fixed near-ceiling value) visibly
+//      damped the flicker at higher brightness settings, since that
+//      fixed target dominates over the animated input once the raw
+//      color is already this close to it. Passing the real color through
+//      unchanged guarantees the interior looks exactly as alive as every
+//      other unshaded face already does.
 constexpr float kWallWidthPx = 4.0f;
 constexpr float kInnerGlowBandFraction = 0.5f;
 
@@ -53,19 +62,6 @@ uint16_t blendColor(uint16_t colorA, uint16_t colorB, float t) {
   int outG = aG + (int)((bG - aG) * t + 0.5f);
   int outB = aB + (int)((bB - aB) * t + 0.5f);
   return ((uint16_t)outR << 11) | ((uint16_t)outG << 5) | (uint16_t)outB;
-}
-
-// The hot core color a carved opening's interior glows toward: pushes
-// green up toward red (yellow) and adds a touch of blue, for a
-// white-hot look rather than just a brighter version of the same orange.
-uint16_t hotColor(uint16_t base) {
-  int r5 = (base >> 11) & 0x1F;
-  int g6 = (base >> 5) & 0x3F;
-  int hotG = g6 + (63 - g6) * 3 / 5;
-  if (hotG > 63) {
-    hotG = 63;
-  }
-  return ((uint16_t)r5 << 11) | ((uint16_t)hotG << 5) | (uint16_t)6;
 }
 
 // The wall band's inner face color, where it meets the glowing interior -
@@ -180,7 +176,6 @@ void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
     remainingInradius = 1.0f;
   }
 
-  uint16_t hot = hotColor(color);
   uint16_t wall = wallColor(color);
   uint16_t edge = edgeColor(color);
 
@@ -202,7 +197,7 @@ void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
                                   saturateOverSpan(minDist, kWallWidthPx));
         } else {
           pixelColor = blendColor(
-              wall, hot,
+              wall, color,
               saturateOverSpan(minDist - kWallWidthPx,
                                remainingInradius * kInnerGlowBandFraction));
         }
@@ -311,7 +306,6 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
     mouthBuffer[i] = RGB565_BLACK;
   }
 
-  uint16_t mouthHot = hotColor(faceColor);
   uint16_t mouthWall = wallColor(faceColor);
   uint16_t mouthEdge = edgeColor(faceColor);
 
@@ -342,7 +336,7 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
               mouthEdge, mouthWall, saturateOverSpan(distFromEdge, kWallWidthPx));
         } else {
           pixelColor = blendColor(
-              mouthWall, mouthHot,
+              mouthWall, faceColor,
               saturateOverSpan(distFromEdge - kWallWidthPx,
                                remainingHalfThickness * kInnerGlowBandFraction));
         }

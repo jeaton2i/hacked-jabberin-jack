@@ -1,8 +1,8 @@
 """Desktop preview of the current 220x176 TriangleFace firmware face.
 
 Renders with numpy/Pillow rather than Tkinter's own vector shapes, since
-this needs to reproduce the firmware's actual per-pixel radial glow (see
-kGlowBandFraction's comment in firmware/src/faces/triangle_face.cpp) - a
+this needs to reproduce the firmware's actual per-pixel wall+glow shading
+(see kWallWidthPx's comment in firmware/src/faces/triangle_face.cpp) - a
 plain flat-color polygon fill, which is all Tkinter's canvas can do on its
 own, can't show that.
 """
@@ -18,7 +18,8 @@ WIDTH = 220
 HEIGHT = 176
 SCALE = 3
 PI = math.pi
-GLOW_BAND_FRACTION = 0.4  # see kGlowBandFraction's comment in the firmware
+WALL_WIDTH_PX = 4.0  # see kWallWidthPx's comment in the firmware
+INNER_GLOW_BAND_FRACTION = 0.5  # see kInnerGlowBandFraction's comment
 
 
 def blend_color(a, b, t):
@@ -26,35 +27,36 @@ def blend_color(a, b, t):
     return tuple(int(a[i] + (b[i] - a[i]) * t + 0.5) for i in range(3))
 
 
-def hot_color(base):
-    """The hot core color a carved opening's interior glows toward - see
-    hotColor() in the firmware."""
-    r, g, _ = base
-    r5 = r >> 3
-    g6 = g >> 2
-    hot_g6 = min(63, g6 + (63 - g6) * 3 // 5)
-    return (r5 << 3, hot_g6 << 2, 6 << 3)
-
-
-def cool_color(base):
-    """The cooler red-orange a carved opening's cut edge fades to - see
-    coolColor() in the firmware."""
+def wall_color(base):
+    """The wall band's inner face color, where it meets the glowing
+    interior - see wallColor() in the firmware."""
     r, g, _ = base
     r5 = r >> 3
     g6 = g >> 2
     return (int(r5 * 0.8) << 3, int(g6 * 0.35) << 2, 0)
 
 
-def glow_amount(dist, inradius):
-    inradius = max(1.0, inradius)
-    return max(0.0, min(1.0, dist / (inradius * GLOW_BAND_FRACTION)))
+def edge_color(base):
+    """The wall band's outer face color, right at the true cut edge - see
+    edgeColor() in the firmware."""
+    r, g, _ = base
+    r5 = r >> 3
+    g6 = g >> 2
+    return (int(r5 * 0.4) << 3, int(g6 * 0.1) << 2, 0)
+
+
+def saturate_over_span(dist, span):
+    span = max(1.0, span)
+    return max(0.0, min(1.0, dist / span))
 
 
 def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color):
-    """Same barycentric fill + per-pixel edge-distance glow as
+    """Same barycentric fill + per-pixel wall/glow zones as
     fillTriangleGradedInBuffer() in the firmware, vectorized across each
     row's columns (rather than a fully per-pixel Python loop) since this
-    runs every frame at interactive speed."""
+    runs every frame at interactive speed. The interior's "hot" endpoint
+    is the real, unmodified flicker color (not a synthesized brighter
+    tone) - see the firmware's comment on why."""
     min_x = max(0, int(math.floor(min(x0, x1, x2))))
     max_x = min(WIDTH - 1, int(math.ceil(max(x0, x1, x2))))
     min_y = max(0, int(math.floor(min(y0, y1, y2))))
@@ -68,9 +70,10 @@ def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color):
     area = 0.5 * abs((x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0))
     semiperimeter = (len01 + len12 + len20) * 0.5
     inradius = area / semiperimeter if semiperimeter > 0 else 1.0
+    remaining_inradius = max(1.0, inradius - WALL_WIDTH_PX)
 
-    hot = hot_color(color)
-    cool = cool_color(color)
+    wall = wall_color(color)
+    edge = edge_color(color)
 
     xs = np.arange(min_x, max_x + 1)
     for y in range(min_y, max_y + 1):
@@ -84,11 +87,17 @@ def fill_triangle_graded(img, x0, y0, x1, y1, x2, y2, color):
         dist1 = np.abs(w1) / len12
         dist2 = np.abs(w2) / len20
         min_dist = np.minimum(np.minimum(dist0, dist1), dist2)
-        glow = np.clip(min_dist / (inradius * GLOW_BAND_FRACTION), 0.0, 1.0)
+
+        wall_t = np.clip(min_dist / WALL_WIDTH_PX, 0.0, 1.0)
+        glow_t = np.clip((min_dist - WALL_WIDTH_PX) / (remaining_inradius * INNER_GLOW_BAND_FRACTION), 0.0, 1.0)
+        is_wall = min_dist < WALL_WIDTH_PX
+
         row = img[y, min_x:max_x + 1]
         for i in range(3):
-            row[..., i] = np.where(
-                mask, (cool[i] + (hot[i] - cool[i]) * glow).astype(np.uint8), row[..., i])
+            wall_val = edge[i] + (wall[i] - edge[i]) * wall_t
+            glow_val = wall[i] + (color[i] - wall[i]) * glow_t
+            val = np.where(is_wall, wall_val, glow_val)
+            row[..., i] = np.where(mask, val.astype(np.uint8), row[..., i])
 
 
 def smile_arc_y(corner_y, depth, x, left_x, right_x):
@@ -139,6 +148,10 @@ class FacePreview:
             + 0.05 * math.sin(phase * 2.37)
             + 0.03 * math.sin(phase * 5.11)
         )
+        # Same clamp as CandleFlicker::color() with the default 115%
+        # brightness, so the preview shows the same clamped-plateau
+        # behavior the real firmware does.
+        illumination = min(1.0, illumination * 1.15)
         face_color = (int(255 * illumination), int(145 * illumination), 0)
 
         img = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
@@ -173,8 +186,8 @@ class FacePreview:
             center_x + nose_size, nose_y + nose_size,
             face_color)
 
-        mouth_hot = hot_color(face_color)
-        mouth_cool = cool_color(face_color)
+        mouth_wall = wall_color(face_color)
+        mouth_edge = edge_color(face_color)
 
         for x in range(math.floor(mouth_left), math.ceil(mouth_right) + 1):
             upper_y = smile_arc_y(mouth_y, upper_depth, x, mouth_left, mouth_right)
@@ -184,11 +197,19 @@ class FacePreview:
             if y0 > y1 or not (0 <= x < WIDTH):
                 continue
             half_thickness = (lower_y - upper_y) * 0.5
+            remaining_half = max(1.0, half_thickness - WALL_WIDTH_PX)
             ys = np.arange(y0, y1 + 1)
             dist_from_edge = np.minimum(ys - upper_y, lower_y - ys)
-            glow = np.clip(dist_from_edge / max(1.0, half_thickness * GLOW_BAND_FRACTION), 0.0, 1.0)
+            wall_t = np.clip(dist_from_edge / WALL_WIDTH_PX, 0.0, 1.0)
+            glow_t = np.clip((dist_from_edge - WALL_WIDTH_PX) / (remaining_half * INNER_GLOW_BAND_FRACTION), 0.0, 1.0)
+            is_wall = dist_from_edge < WALL_WIDTH_PX
             col = np.stack([
-                mouth_cool[i] + (mouth_hot[i] - mouth_cool[i]) * glow for i in range(3)
+                np.where(
+                    is_wall,
+                    mouth_edge[i] + (mouth_wall[i] - mouth_edge[i]) * wall_t,
+                    mouth_wall[i] + (face_color[i] - mouth_wall[i]) * glow_t,
+                )
+                for i in range(3)
             ], axis=1).astype(np.uint8)
             img[y0:y1 + 1, x] = col
 
