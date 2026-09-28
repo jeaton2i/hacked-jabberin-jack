@@ -20,6 +20,18 @@ constexpr int16_t kFeatureBufferSize = 80;
 // CandleFlicker::tint()'s kDimFloor for carved image faces.
 constexpr float kShadeMinScale = 0.45f;
 
+// A plain top-to-bottom brightness fade alone reads as a flat color tint,
+// not depth - what actually sells "carved" in flat 2D art is contrast
+// between a shape's edge and its interior, like a beveled cut catching
+// light along its rim. So every carved opening also gets a thin band at
+// full brightness (kRimScale, deliberately ignoring the vertical gradient
+// entirely - the cut edge catches some light all the way around,
+// regardless of which side is otherwise in shadow) running kRimWidthPx
+// pixels in from its boundary, with the gradient only showing through in
+// the interior beyond that.
+constexpr float kRimScale = 1.0f;
+constexpr float kRimWidthPx = 2.0f;
+
 uint16_t scaleColor(uint16_t color, float scale) {
   if (scale >= 1.0f) {
     return color;
@@ -93,12 +105,14 @@ void fillTriangleInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
   }
 }
 
-// Same shape-fill as fillTriangleInBuffer, but each row is shaded by
-// verticalShadeScale() instead of filled with one flat color - the 3D
-// look for the eyes and nose (see that function's comment). shadeTopY/
-// shadeBottomY are in the same coordinate space as the triangle's own
-// points (i.e. buffer-local, not absolute screen coordinates - the caller
-// shifts both by the same origin).
+// Same shape-fill as fillTriangleInBuffer, but shaded for a 3D-carved
+// look: each row is scaled by verticalShadeScale() instead of filled with
+// one flat color, and a kRimWidthPx-wide band along the triangle's own
+// edges is additionally forced to kRimScale regardless of that gradient
+// (see kRimScale's comment). shadeTopY/shadeBottomY are in the same
+// coordinate space as the triangle's own points (i.e. buffer-local, not
+// absolute screen coordinates - the caller shifts both by the same
+// origin).
 void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
                                 int16_t x0, int16_t y0, int16_t x1, int16_t y1,
                                 int16_t x2, int16_t y2, uint16_t color,
@@ -112,9 +126,21 @@ void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
   if (maxX > bufW - 1) maxX = bufW - 1;
   if (maxY > bufH - 1) maxY = bufH - 1;
 
+  // w0/w1/w2 below are each edge's cross product evaluated at (x, y),
+  // i.e. (signed distance from that edge line) * (that edge's length) -
+  // dividing by each edge's own length converts it into an actual
+  // perpendicular pixel distance, for the rim-width comparison.
+  float len01 = sqrtf((float)(x1 - x0) * (x1 - x0) + (float)(y1 - y0) * (y1 - y0));
+  float len12 = sqrtf((float)(x2 - x1) * (x2 - x1) + (float)(y2 - y1) * (y2 - y1));
+  float len20 = sqrtf((float)(x0 - x2) * (x0 - x2) + (float)(y0 - y2) * (y0 - y2));
+  if (len01 < 1.0f) len01 = 1.0f;
+  if (len12 < 1.0f) len12 = 1.0f;
+  if (len20 < 1.0f) len20 = 1.0f;
+  uint16_t rimColor = scaleColor(color, kRimScale);
+
   for (int16_t y = minY; y <= maxY; y++) {
-    // Same color for the whole row, so compute it once rather than once
-    // per pixel.
+    // Same interior color for the whole row, so compute it once rather
+    // than once per pixel.
     uint16_t shaded =
         scaleColor(color, verticalShadeScale(y, shadeTopY, shadeBottomY));
     for (int16_t x = minX; x <= maxX; x++) {
@@ -123,7 +149,10 @@ void fillTriangleGradedInBuffer(uint16_t *buffer, int16_t bufW, int16_t bufH,
       int32_t w2 = (x0 - x2) * (y - y2) - (y0 - y2) * (x - x2);
       if ((w0 >= 0 && w1 >= 0 && w2 >= 0) ||
           (w0 <= 0 && w1 <= 0 && w2 <= 0)) {
-        buffer[y * bufW + x] = shaded;
+        bool isRim = fabsf((float)w0) / len01 <= kRimWidthPx ||
+                    fabsf((float)w1) / len12 <= kRimWidthPx ||
+                    fabsf((float)w2) / len20 <= kRimWidthPx;
+        buffer[y * bufW + x] = isRim ? rimColor : shaded;
       }
     }
   }
@@ -248,6 +277,10 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
         faceColor, verticalShadeScale(mouthY + row, shadeTopY, shadeBottomY));
   }
 
+  // Same rim-highlight idea as fillTriangleGradedInBuffer, along the
+  // mouth's own upper/lower arcs rather than straight edges.
+  uint16_t mouthRimColor = scaleColor(faceColor, kRimScale);
+
   for (int16_t x = mouthLeft; x <= mouthRight; x++) {
     int16_t upperY = smileArcY(mouthY, mouthUpperDepth, x, mouthLeft,
                                mouthRight);
@@ -257,7 +290,9 @@ void TriangleFace::draw(Arduino_GFX *gfx) {
     for (int16_t y = upperY; y <= lowerY; y++) {
       int16_t row = y - mouthY;
       if (row >= 0 && row < mouthHeight) {
-        mouthBuffer[row * mouthWidth + col] = mouthRowColor[row];
+        bool isRim = (y - upperY) <= kRimWidthPx || (lowerY - y) <= kRimWidthPx;
+        mouthBuffer[row * mouthWidth + col] =
+            isRim ? mouthRimColor : mouthRowColor[row];
       }
     }
   }
