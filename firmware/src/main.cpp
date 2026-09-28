@@ -578,6 +578,7 @@ void printHelp() {
   cmdOut->println("Serial commands:");
   cmdOut->println("  <enter>     - advance to next enabled face");
   cmdOut->println("  list        - list faces with on/off state + rotate interval");
+  cmdOut->println("  goto <n>    - jump directly to face n (index from 'list'), regardless of its on/off state");
   cmdOut->println("  status      - print machine-readable JSON status (see printStatusJson)");
   cmdOut->println("  <n>         - toggle face n on/off");
   cmdOut->println("  text <l1>[|l2|l3|l4] - set ConfigurableText (up to 4 lines) and show it");
@@ -616,8 +617,10 @@ const char *skipSpaces(const char *line) {
 
 // Serial UI: an empty line (just press enter) or any unrecognized input
 // advances to the next enabled face (keeps the old "mash a key"
-// convenience); "list"/"help" print info; a bare number toggles that face's
-// on/off state; "rotate", "brightness", "order", "esp32link", "save",
+// convenience); "list"/"help" print info; "goto" jumps straight to a face
+// by index regardless of its enabled state; a bare number instead toggles
+// that face's on/off state; "rotate", "brightness", "order", "esp32link",
+// "save",
 // "load", and "reset" manage persisted config; "text" sets
 // ConfigurableTextFace's message; "font" lists/sets its font; "audio"
 // plays a test tone or speech clip over this board's own I2S output, or
@@ -631,6 +634,21 @@ void handleSerialCommand(const char *line) {
   }
   if (strcmp(line, "list") == 0) {
     printFaceList();
+    return;
+  }
+  if (strncmp(line, "goto", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
+    const char *arg = skipSpaces(line + 4);
+    char *end;
+    long index = strtol(arg, &end, 10);
+    if (end == arg || *end != '\0' || index < 0 ||
+        (size_t)index >= kFaceCount) {
+      cmdOut->println("Usage: goto <n> (face index from 'list')");
+      return;
+    }
+    // Unlike auto-rotate/advance, jumps directly regardless of the
+    // target's enabled state - handy for looking at one specific face
+    // without having to toggle everything else off first.
+    selectFace((size_t)index);
     return;
   }
   if (strcmp(line, "status") == 0) {

@@ -118,6 +118,7 @@ command list; send `help` any time to see it again.
 |---------------|-------------------------------------------------------------|
 | *(enter)*     | Advance to the next enabled face                           |
 | `list`        | List every face with its on/off state, and the rotate interval |
+| `goto <n>`    | Jump directly to face `n` (index from `list`), regardless of its on/off state |
 | `status`      | Print a machine-readable JSON snapshot of everything below (used by the ESP32 bridge, see below) |
 | `<n>`         | Toggle face `n` on/off (index from `list`)                 |
 | `text <l1>[\|l2\|l3\|l4]` | Set the `ConfigurableText` face's message (up to 4 lines, split on `\|`) and jump to it |
