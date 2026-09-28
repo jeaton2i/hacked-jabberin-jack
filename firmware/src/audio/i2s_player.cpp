@@ -21,9 +21,24 @@ constexpr uint32_t kSampleRate = 8000;
 constexpr float kTwoPi = 6.283185307179586f;
 constexpr int16_t kToneAmplitude = 12000; // headroom below full-scale int16
 
+// Bigger than this library's own default (6 buffers x 64 words, ~48ms at
+// 8kHz) - pump() is only fed once per main loop() iteration, and that
+// loop's own draw() work plus its flat 16ms delay() can add up to well
+// past 48ms some iterations, which would otherwise starve the DMA buffer
+// mid-clip (an audible glitch) rather than just fall a bit behind on
+// elapsedMsAsync()'s accuracy. 24 x 128 words = 3072 samples, ~384ms at
+// 8kHz - comfortable headroom, and still a trivial ~12KB of RAM.
+constexpr size_t kAsyncBuffers = 24;
+constexpr size_t kAsyncBufferWords = 128;
+
 I2S i2s(OUTPUT, PIN_I2S_BCLK, PIN_I2S_DATA);
 bool began = false;
 float volumeScale = 1.0f;
+
+// startClipAsync()/pump() state - see i2s_player.h.
+const int16_t *asyncSamples = nullptr;
+size_t asyncLength = 0;
+size_t asyncPos = 0;
 
 void playSineTone(float freqHz, unsigned long durationMs) {
   size_t sampleCount = (size_t)(kSampleRate * durationMs / 1000);
@@ -37,11 +52,14 @@ void playSineTone(float freqHz, unsigned long durationMs) {
 } // namespace
 
 void I2sPlayer::begin() {
+  i2s.setBuffers(kAsyncBuffers, kAsyncBufferWords);
   began = i2s.begin(kSampleRate);
   if (!began) {
     Serial.println("I2S audio init failed - check PIN_I2S_BCLK/DATA wiring");
   }
 }
+
+bool I2sPlayer::ready() { return began; }
 
 void I2sPlayer::setVolume(float volume) {
   if (volume < 0.0f) {
@@ -79,4 +97,52 @@ void I2sPlayer::playClip(const int16_t *samples, size_t length,
     int16_t sample = (int16_t)(samples[i] * volumeScale);
     i2s.write16(sample, sample);
   }
+}
+
+void I2sPlayer::startClipAsync(const int16_t *samples, size_t length,
+                               uint32_t sampleRate) {
+  if (!began) {
+    return;
+  }
+  if (sampleRate != kSampleRate) {
+    Serial.print("Audio clip is ");
+    Serial.print(sampleRate);
+    Serial.print("Hz but I2S output is fixed at ");
+    Serial.print(kSampleRate);
+    Serial.println("Hz - skipping playback rather than mis-pitching it");
+    return;
+  }
+  asyncSamples = samples;
+  asyncLength = length;
+  asyncPos = 0;
+}
+
+void I2sPlayer::pump() {
+  if (!began || !asyncSamples || asyncPos >= asyncLength) {
+    return;
+  }
+  // i2s.availableForWrite() is in bytes, 4 per write16() call (one 32-bit
+  // L+R word) - see I2S::availableForWrite(). Only writing while there's
+  // room is what makes this non-blocking: write16() itself busy-waits if
+  // the buffer's actually full, which asking first avoids hitting.
+  while (asyncPos < asyncLength && i2s.availableForWrite() >= 4) {
+    int16_t sample = (int16_t)(asyncSamples[asyncPos] * volumeScale);
+    i2s.write16(sample, sample);
+    asyncPos++;
+  }
+  if (asyncPos >= asyncLength) {
+    asyncSamples = nullptr;
+  }
+}
+
+void I2sPlayer::stopAsync() {
+  asyncSamples = nullptr;
+  asyncLength = 0;
+  asyncPos = 0;
+}
+
+bool I2sPlayer::isPlayingAsync() { return asyncSamples != nullptr; }
+
+uint32_t I2sPlayer::elapsedMsAsync() {
+  return (uint32_t)((uint64_t)asyncPos * 1000 / kSampleRate);
 }

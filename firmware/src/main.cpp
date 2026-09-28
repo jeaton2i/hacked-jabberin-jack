@@ -145,7 +145,8 @@ TextFace configurableTextFace("Set my text!");
 // part of the normal rotation, so it's always left disabled in
 // kDefaultFaceEnabled and jumped to directly by index instead.
 TextFace statusMessageFace("");
-PacManFace pacManFace;
+PacManFace pacManFace(audio_pacman, audio_pacman_length,
+                      audio_pacman_sample_rate);
 TropicalFace tropicalFace;
 EyeLookFace eyeLookFace;
 RobotLookFace robotLookFace;
@@ -568,6 +569,12 @@ void resetToDefaults() {
 }
 
 void selectFace(size_t index) {
+  // Only PacManFace currently uses startClipAsync() (see its class
+  // comment), but stopping unconditionally here - rather than adding an
+  // onExit() to the shared Face interface just for this - means whatever
+  // it queued can't keep playing out over an unrelated face after the
+  // user navigates away from it.
+  I2sPlayer::stopAsync();
   currentFace = index;
   // Always clear the whole panel between faces. Faces only redraw their
   // own shapes each frame (not a full clear, to avoid flicker), so
@@ -1437,6 +1444,7 @@ void loop() {
   faces[currentFace]->update();
   faces[currentFace]->draw(display.gfx());
   updateLeds();
+  I2sPlayer::pump();
 
   delay(16); // ~60 fps target
 }

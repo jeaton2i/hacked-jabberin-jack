@@ -5,11 +5,16 @@
 
 // Drives an I2S DAC/amp (e.g. a MAX98357A) wired to the RP2040's PIO-based
 // I2S output for simple mono audio playback - see
-// docs/audio-i2s-wiring.md for wiring. Playback is blocking (a clip or
-// test tone takes over the CPU for its own duration - no face animation,
-// button, or serial polling happens meanwhile), which is fine for the
-// short clips this is meant for; a longer/overlapping-audio use case would
-// need a non-blocking, DMA-callback-driven rewrite instead.
+// docs/audio-i2s-wiring.md for wiring. playTestTone()/playClip() are
+// blocking (a clip or test tone takes over the CPU for its own duration -
+// no face animation, button, or serial polling happens meanwhile), which
+// is fine for the short manually-triggered test clips they're meant for.
+// startClipAsync()/pump() below are the non-blocking alternative for a
+// face that needs to keep animating in step with a clip while it plays
+// (see PacManFace, which uses this to line its power-pellet visual up
+// with the same moment in the clip) - not DMA-callback-driven, just fed
+// incrementally from pump() rather than all at once, but that's enough
+// since it only needs to not-block, not truly run in the background.
 namespace I2sPlayer {
 
 // Brings up the I2S output at the fixed sample rate every clip and the
@@ -20,6 +25,15 @@ namespace I2sPlayer {
 // PIO-based, and there's no reason to assume it would be any more
 // forgiving of the same mistake, so this firmware just doesn't try it.
 void begin();
+
+// True once begin() has brought the I2S output up successfully - false
+// if it failed (see begin()'s own log line) or hasn't run yet. Lets a
+// caller that wants to track actual playback position (see
+// elapsedMsAsync()) tell "no clip is queued" apart from "there's no
+// audio hardware to ever queue one against" and fall back to a plain
+// wall-clock timer in the latter case - PacManFace does this, so it
+// still animates (just without the audio sync) if nothing's wired up.
+bool ready();
 
 // Software volume scale applied to every sample this plays (the test
 // tone and any clip), independent of the MAX98357A's own fixed hardware
@@ -41,5 +55,40 @@ void playTestTone();
 // (rather than silently mis-pitching it) - see the array's own generated
 // _sample_rate constant.
 void playClip(const int16_t *samples, size_t length, uint32_t sampleRate);
+
+// Starts a clip playing without blocking - returns immediately, and
+// nothing is actually sent to the I2S output until pump() is called.
+// Cancels/replaces whatever startClipAsync() clip (if any) was still
+// playing. Same sampleRate restriction as playClip().
+void startClipAsync(const int16_t *samples, size_t length,
+                    uint32_t sampleRate);
+
+// Feeds as many samples of the current startClipAsync() clip as the I2S
+// output's DMA buffer currently has room for, without blocking - call
+// this every loop() iteration regardless of which face is active (a
+// no-op if nothing is playing). Falling behind (a slow loop() iteration)
+// just means this catches up next call; the DMA buffer is sized with
+// enough headroom to absorb that.
+void pump();
+
+// Stops feeding the current startClipAsync() clip - call when switching
+// away from whatever face started it, so its sound doesn't keep playing
+// over an unrelated face (see main.cpp's selectFace()). Whatever's
+// already in the DMA buffer still plays out; this just stops queuing
+// more of it.
+void stopAsync();
+
+// True from startClipAsync() until the whole clip has been fed to pump()
+// (not until it's finished actually playing - see the buffer note above).
+bool isPlayingAsync();
+
+// Milliseconds of the current/most recent startClipAsync() clip fed to
+// the I2S output so far - an approximation of actual playback position,
+// off by however much is still sitting in the DMA buffer unplayed (at
+// most a few tens of ms - see kAsyncBuffers/kAsyncBufferWords in
+// i2s_player.cpp), which is fine for a decorative visual sync and not
+// worth chasing more precisely. 0 once a clip finishes or before one's
+// ever been started.
+uint32_t elapsedMsAsync();
 
 } // namespace I2sPlayer

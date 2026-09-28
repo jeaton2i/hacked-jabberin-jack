@@ -3,6 +3,8 @@
 #include <math.h>
 #include <string.h>
 
+#include "../audio/i2s_player.h"
+
 namespace {
 constexpr int16_t kPanelWidth = 220;
 constexpr int16_t kPanelHeight = 176;
@@ -12,10 +14,14 @@ constexpr float kDotRadius = 3.0f;
 constexpr float kPillRadius = 7.0f;
 constexpr float kPillX = kPanelWidth / 2.0f;
 constexpr float kGhostRadius = 16.0f;
-constexpr float kSpeed = 1.5f;
 constexpr float kGhostChaseSpeed = 1.1f;
 constexpr float kGhostFleeSpeed = 2.0f;
 constexpr int16_t kStripHeight = 16;
+
+// Pac-Man's travel path, off-screen edge to off-screen edge - see the
+// class comment on why kPillX sitting at this span's midpoint matters.
+constexpr float kStartX = kPanelWidth + kRadius;
+constexpr float kEndX = -kRadius;
 
 constexpr uint16_t kGhostChaseColor = ((31) << 11) | ((22) << 5) | 18; // pink-red
 constexpr uint16_t kGhostFleeColor = ((14) << 11) | ((44) << 5) | 31; // pale blue
@@ -48,13 +54,15 @@ void paintRegion(uint16_t *stripBuffer, int16_t rowOffset,
 } // namespace
 
 void PacManFace::resetRound() {
-  _x = kPanelWidth + kRadius;
+  _x = kStartX;
   for (bool &eaten : _dotEaten) {
     eaten = false;
   }
   _pillEaten = false;
   _ghostFleeing = false;
   _ghostX = -kGhostRadius;
+  _roundStartMillis = millis();
+  I2sPlayer::startClipAsync(_audioSamples, _audioLength, _audioSampleRate);
 }
 
 void PacManFace::begin(Arduino_GFX *gfx) {
@@ -71,12 +79,16 @@ void PacManFace::begin(Arduino_GFX *gfx) {
 void PacManFace::update() {
   _flicker.update();
   _mouthPhase += 0.35f;
-  _x -= kSpeed; // right to left
 
-  if (_x < -kRadius) {
+  uint32_t elapsedMs = I2sPlayer::ready()
+                          ? I2sPlayer::elapsedMsAsync()
+                          : (uint32_t)(millis() - _roundStartMillis);
+  if (elapsedMs >= _roundDurationMs) {
     resetRound();
     return;
   }
+  float progress = (float)elapsedMs / (float)_roundDurationMs;
+  _x = kStartX + (kEndX - kStartX) * progress; // right to left
 
   for (int i = 0; i < kDotCount; i++) {
     if (!_dotEaten[i] && fabsf(_x - _dotX[i]) < kRadius) {
