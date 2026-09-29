@@ -245,15 +245,16 @@ static const char INDEX_HTML[] = R"HTML(
       docs/audio-i2s-wiring.md).
     </p>
     <div class="row">
-      <button id="audioToneBtn" class="secondary">Tone</button>
-      <button id="audioVoiceBtn" class="secondary">Voice</button>
-      <button id="audioPacmanBtn" class="secondary">Pac-Man</button>
+      <button id="muteBtn" class="secondary">Mute</button>
     </div>
 
     <label for="volume">Volume<span class="value-readout" id="volumeReadout"></span></label>
     <input type="range" id="volume" min="0" max="100" step="5">
+
     <div class="row" style="margin-top:10px;">
-      <button id="muteBtn" class="secondary">Mute</button>
+      <button id="audioToneBtn" class="secondary">Tone</button>
+      <button id="audioVoiceBtn" class="secondary">Voice</button>
+      <button id="audioPacmanBtn" class="secondary">Pac-Man</button>
     </div>
   </section>
 
@@ -322,6 +323,21 @@ function updateRotateControlsEnabled() {
   document.getElementById("rotateMs").disabled = !enabled;
   document.getElementById("rotateApplyBtn").disabled = !enabled;
   document.getElementById("orderSelect").disabled = !enabled;
+}
+
+// Volume and the Tone/Voice/Pac-Man test buttons don't mean anything
+// while muted - disabled rather than left interactive-but-pointless,
+// same idea as updateRotateControlsEnabled() above. Reads muted state off
+// the Mute button's own label (set from status.volumePercent in
+// applyStatus(), or optimistically the instant it's clicked) rather than
+// taking a separate parameter, so every caller stays in sync with
+// whatever's actually currently displayed there.
+function updateAudioControlsEnabled() {
+  var muted = document.getElementById("muteBtn").textContent === "Unmute";
+  document.getElementById("volume").disabled = muted;
+  document.getElementById("audioToneBtn").disabled = muted;
+  document.getElementById("audioVoiceBtn").disabled = muted;
+  document.getElementById("audioPacmanBtn").disabled = muted;
 }
 
 function setBanner(text, isError) {
@@ -490,6 +506,7 @@ function applyStatus(status) {
   }
   document.getElementById("volumeReadout").textContent = status.volumePercent + "%";
   document.getElementById("muteBtn").textContent = status.volumePercent === 0 ? "Unmute" : "Mute";
+  updateAudioControlsEnabled();
 
   document.getElementById("jackPinsReadout").textContent =
       "TX=" + status.esp32TxPin + " RX=" + status.esp32RxPin;
@@ -650,7 +667,11 @@ document.getElementById("volume").addEventListener("change", function (e) {
   sendCommand("volume " + e.target.value).then(refreshStatus);
 });
 
-document.getElementById("muteBtn").addEventListener("click", function () {
+document.getElementById("muteBtn").addEventListener("click", function (e) {
+  // Instant feedback, same pattern as rotateEnabled's change listener -
+  // corrected by the refreshStatus() below regardless of what it guessed.
+  e.target.textContent = e.target.textContent === "Unmute" ? "Mute" : "Unmute";
+  updateAudioControlsEnabled();
   sendCommand("mute").then(refreshStatus);
 });
 
