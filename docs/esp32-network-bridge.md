@@ -200,33 +200,39 @@ the plain IP address at boot as a fallback (works everywhere, mDNS or not).
 
 ## Using the web UI
 
-The page at `/` exposes every setting the serial console does: current
+The page at `/` exposes most of what the serial console does: current
 face + a "next face" button, auto-rotate on/off and interval, face order
 (in-order/random), brightness, per-face on/off toggles, the configurable
 text message and its font, the Countdown face's holiday name/date (see
-"Countdown / date sync" below), the eye-look debug logging toggle, and
-save/load/reset. It polls the controller every few seconds so it stays in
-sync with physical button presses too.
+"Countdown / date sync" below), audio (see below), and save/load/reset.
+It polls the controller every few seconds so it stays in sync with
+physical button presses too - and the whole page disables itself if that
+polling ever fails, rather than leaving controls sitting there that would
+just silently do nothing. The eye-look debug logging toggle isn't
+exposed here (still available directly as the RP2040's own `debug`
+serial command) - a diagnostic aid for tuning that motion, not something
+this page's actual audience needs day to day.
 
-Its "Bridge Link" section additionally shows and edits each side's link
-GPIOs - see "Changing which pins are used" above for what's actually valid
-on each side before touching these. Applying either side's pins triggers
-that board's own reboot to apply them (immediately for the ESP32, which
-the page waits out and reconnects to on its own; after a save-and-reboot
-for the RP2040, which the page can't wait out for you since it's a
-separate device - refresh once it's back). On the USB host build, the
-"This board's pins" half of that section is replaced with a note that
-there's nothing to configure there.
+Its "Bridge Link" section shows and edits *this board's own* link GPIOs
+only - see "Changing which pins are used" above for what's valid there.
+Applying them triggers this board's own reboot, which the page waits out
+and reconnects to on its own. The RP2040's pins are shown read-only
+instead of editable: changing them only works if this link is already
+correctly configured, which defeats the point of fixing it remotely - set
+those directly at the RP2040's own serial console (`esp32link` command)
+instead. On the USB host build, the "This board's pins" half of that
+section is replaced with a note that there's nothing to configure there.
 
-Its "Audio" section plays this bridge's own I2S speaker directly (if
-wired - see `docs/audio-i2s-wiring.md`), independent of the RP2040
-entirely - useful for testing the ESP32's own audio wiring without the
-RP2040 attached at all. The RP2040 can also trigger the same playback
-remotely (`audio esp-tone`/`audio esp-voice`); this bridge polls for that
-on its own every 500ms regardless of whether the web page is open.
+Its "Audio" section plays test sounds on the RP2040's own I2S speaker
+(`audio tone`/`audio voice`/`audio pacman` - see
+`docs/audio-i2s-wiring.md`) and shows/sets its volume, with a Mute
+button. This bridge's *own* separate speaker (if wired) isn't controlled
+from this page - see `POST /api/local-audio` below if you want to script
+that one directly - but the RP2040 can still trigger it remotely the same
+as before (`audio esp-tone`/`audio esp-voice`); this bridge polls for
+that on its own every 500ms regardless of whether the web page is open.
 
-Four small HTTP endpoints back the page, in case you want to script it
-instead:
+Small HTTP endpoints back the page (and beyond it, for scripting):
 
 - `GET /api/status` - the RP2040's own JSON status snapshot, passed straight
   through unchanged.
@@ -241,7 +247,9 @@ instead:
 - `POST /api/link-pins` - form fields `rxPin`/`txPin`; persists them and
   restarts the bridge to apply. Only meaningful on the UART build.
 - `POST /api/local-audio` - body `tone` or `voice`; plays immediately on
-  this bridge's own speaker, no RP2040 involved.
+  this bridge's own separate speaker, no RP2040 involved. Not linked from
+  any button on the page itself (see "Using the web UI" above) - purely
+  for scripting/testing that speaker's wiring directly.
 
 ## Countdown / date sync
 

@@ -38,7 +38,6 @@ static const char INDEX_HTML[] = R"HTML(
     margin: 0 0 4px;
     color: var(--accent);
   }
-  .sub { color: var(--muted); margin: 0 0 16px; font-size: 0.9em; }
   section {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -126,20 +125,32 @@ static const char INDEX_HTML[] = R"HTML(
   }
   .face-row:last-child { border-bottom: none; }
   .face-row.current { color: var(--accent); font-weight: 600; }
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
   #statusBanner {
     font-size: 0.85em;
     color: var(--muted);
-    margin-bottom: 10px;
     min-height: 1.2em;
   }
   #statusBanner.error { color: var(--danger); }
   .value-readout { color: var(--muted); font-size: 0.85em; float: right; }
+  input:disabled, select:disabled, button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
 </style>
 </head>
 <body>
-  <h1>Jabberin' Jack</h1>
-  <p class="sub">Pumpkin control panel</p>
-  <div id="statusBanner">Loading&hellip;</div>
+  <div class="page-header">
+    <h1 style="margin:0;">Jabberin' Jack</h1>
+    <div id="statusBanner">Loading&hellip;</div>
+  </div>
 
   <section>
     <h2>Now Showing</h2>
@@ -150,18 +161,17 @@ static const char INDEX_HTML[] = R"HTML(
   </section>
 
   <section>
-    <h2>Auto-Rotate</h2>
-    <div class="switch-row">
-      <label for="rotateEnabled" style="margin:0;">Enabled</label>
+    <h2 class="switch-row" style="margin:0 0 10px;padding:0;">
+      <span>Auto-Rotate</span>
       <label class="switch">
         <input type="checkbox" id="rotateEnabled">
         <span class="slider"></span>
       </label>
-    </div>
+    </h2>
     <label for="rotateMs">Interval (ms)</label>
-    <input type="number" id="rotateMs" min="0" step="500">
-    <div class="row" style="margin-top:10px;">
-      <button id="rotateApplyBtn">Apply</button>
+    <div class="row">
+      <input type="number" id="rotateMs" min="0" step="500">
+      <button id="rotateApplyBtn" style="flex:0 0 auto;">Apply</button>
     </div>
 
     <label for="orderSelect">Face order</label>
@@ -229,28 +239,21 @@ static const char INDEX_HTML[] = R"HTML(
   </section>
 
   <section>
-    <h2>Diagnostics</h2>
-    <div class="switch-row">
-      <label for="debugLogging" style="margin:0;">Eye-look motion debug logging</label>
-      <label class="switch">
-        <input type="checkbox" id="debugLogging">
-        <span class="slider"></span>
-      </label>
-    </div>
-  </section>
-
-  <section>
     <h2>Audio</h2>
     <p style="color:var(--muted);font-size:0.85em;margin:0 0 10px;">
-      Plays on this board's own I2S speaker (if wired - see
-      docs/audio-i2s-wiring.md), independent of the RP2040. The RP2040 can
-      also trigger these remotely via its "audio esp-tone"/"audio
-      esp-voice" commands - this board polls for that on its own, so
-      nothing needs to be open here for it to work.
+      Plays on the RP2040's own I2S speaker (see
+      docs/audio-i2s-wiring.md).
     </p>
     <div class="row">
-      <button id="localAudioToneBtn" class="secondary">Play Tone</button>
-      <button id="localAudioVoiceBtn" class="secondary">Play Voice</button>
+      <button id="audioToneBtn" class="secondary">Tone</button>
+      <button id="audioVoiceBtn" class="secondary">Voice</button>
+      <button id="audioPacmanBtn" class="secondary">Pac-Man</button>
+    </div>
+
+    <label for="volume">Volume<span class="value-readout" id="volumeReadout"></span></label>
+    <input type="range" id="volume" min="0" max="100" step="5">
+    <div class="row" style="margin-top:10px;">
+      <button id="muteBtn" class="secondary">Mute</button>
     </div>
   </section>
 
@@ -283,20 +286,13 @@ static const char INDEX_HTML[] = R"HTML(
       This build talks to the RP2040 over USB host mode - no GPIO pins to configure.
     </p>
 
-    <label>RP2040's pins</label>
-    <div class="row">
-      <div>
-        <label for="jackTxPin" style="margin-top:0;">TX (to this board's RX)</label>
-        <input type="number" id="jackTxPin" min="0" max="28">
-      </div>
-      <div>
-        <label for="jackRxPin" style="margin-top:0;">RX (from this board's TX)</label>
-        <input type="number" id="jackRxPin" min="0" max="28">
-      </div>
-    </div>
-    <div class="row" style="margin-top:10px;">
-      <button id="jackLinkPinsApplyBtn" class="secondary">Apply RP2040's Pins</button>
-    </div>
+    <p style="margin:10px 0 0;">RP2040's pins: <span id="jackPinsReadout">&mdash;</span></p>
+    <p style="color:var(--muted);font-size:0.85em;margin:4px 0 0;">
+      Read-only here - changing these only works if this link is already
+      correctly configured, which defeats the point of fixing it remotely.
+      Set them directly at the RP2040's own serial console instead
+      ("esp32link" command).
+    </p>
   </section>
 
   <section>
@@ -318,10 +314,33 @@ function isEditing(el) {
   return el === document.activeElement;
 }
 
+// The Interval field, order select, and Apply button only mean anything
+// while auto-rotate is actually on - disabled rather than just left
+// interactive-but-pointless while it's off.
+function updateRotateControlsEnabled() {
+  var enabled = document.getElementById("rotateEnabled").checked;
+  document.getElementById("rotateMs").disabled = !enabled;
+  document.getElementById("rotateApplyBtn").disabled = !enabled;
+  document.getElementById("orderSelect").disabled = !enabled;
+}
+
 function setBanner(text, isError) {
   var el = document.getElementById("statusBanner");
   el.textContent = text;
   el.className = isError ? "error" : "";
+}
+
+// Nothing on this page can do anything useful while the bridge itself is
+// unreachable (every button/input here just calls sendCommand()/
+// refreshStatus(), both of which would only fail) - disabling everything
+// makes that obvious instead of leaving controls that silently do nothing.
+// applyStatus() re-enables on every successful poll, layering its own
+// narrower rotate-controls-only disabling (see updateRotateControlsEnabled)
+// back on top afterward.
+function setPageDisabled(disabled) {
+  document.querySelectorAll("input, select, button").forEach(function (el) {
+    el.disabled = disabled;
+  });
 }
 
 function sendCommand(cmd) {
@@ -351,10 +370,13 @@ function refreshStatus() {
     // true and was itself once the symptom of a real bug elsewhere.
     console.error("refreshStatus failed:", err);
     setBanner("Problem talking to the pumpkin controller (see console)", true);
+    setPageDisabled(true);
   });
 }
 
 function applyStatus(status) {
+  setPageDisabled(false);
+
   var faceList = document.getElementById("faceList");
   faceList.innerHTML = "";
   status.faces.forEach(function (face) {
@@ -402,6 +424,7 @@ function applyStatus(status) {
   if (!isEditing(rotateEnabled)) {
     rotateEnabled.checked = status.rotateMs > 0;
   }
+  updateRotateControlsEnabled();
 
   var orderSelect = document.getElementById("orderSelect");
   if (!isEditing(orderSelect)) {
@@ -435,15 +458,15 @@ function applyStatus(status) {
     }
   }
 
-  var debugLogging = document.getElementById("debugLogging");
-  if (!isEditing(debugLogging)) {
-    debugLogging.checked = status.debugLogging;
+  var volume = document.getElementById("volume");
+  if (!isEditing(volume)) {
+    volume.value = status.volumePercent;
   }
+  document.getElementById("volumeReadout").textContent = status.volumePercent + "%";
+  document.getElementById("muteBtn").textContent = status.volumePercent === 0 ? "Unmute" : "Mute";
 
-  var jackTxPin = document.getElementById("jackTxPin");
-  var jackRxPin = document.getElementById("jackRxPin");
-  if (!isEditing(jackTxPin)) { jackTxPin.value = status.esp32TxPin; }
-  if (!isEditing(jackRxPin)) { jackRxPin.value = status.esp32RxPin; }
+  document.getElementById("jackPinsReadout").textContent =
+      "TX=" + status.esp32TxPin + " RX=" + status.esp32RxPin;
 
   var countdown = status.countdown || {};
   // holidayName may itself contain a '|' splitting it across 2 lines (see
@@ -503,6 +526,7 @@ document.getElementById("rotateApplyBtn").addEventListener("click", function () 
 });
 
 document.getElementById("rotateEnabled").addEventListener("change", function (e) {
+  updateRotateControlsEnabled();
   if (!e.target.checked) {
     sendCommand("rotate 0").then(refreshStatus);
   }
@@ -538,10 +562,6 @@ document.getElementById("countdownApplyBtn").addEventListener("click", function 
   }
   var fullName = name2 ? (name + "|" + name2) : name;
   sendCommand("countdown " + month + " " + day + " " + fullName).then(refreshStatus);
-});
-
-document.getElementById("debugLogging").addEventListener("change", function () {
-  sendCommand("debug").then(refreshStatus);
 });
 
 // Polls fn (a function returning a fetch-backed promise) every intervalMs
@@ -584,30 +604,22 @@ document.getElementById("espLinkPinsApplyBtn").addEventListener("click", functio
   });
 });
 
-document.getElementById("jackLinkPinsApplyBtn").addEventListener("click", function () {
-  var txPin = parseInt(document.getElementById("jackTxPin").value, 10);
-  var rxPin = parseInt(document.getElementById("jackRxPin").value, 10);
-  if (!confirm("This changes which GPIOs the RP2040 uses for this link, " +
-              "immediately. If it doesn't match the actual wiring, this " +
-              "bridge will lose contact with the pumpkin until it's " +
-              "fixed. Continue?")) {
-    return;
-  }
-  sendCommand("esp32link " + txPin + " " + rxPin).then(refreshStatus);
+document.getElementById("audioToneBtn").addEventListener("click", function () {
+  sendCommand("audio tone");
+});
+document.getElementById("audioVoiceBtn").addEventListener("click", function () {
+  sendCommand("audio voice");
+});
+document.getElementById("audioPacmanBtn").addEventListener("click", function () {
+  sendCommand("audio pacman");
 });
 
-function playLocalAudio(kind) {
-  return fetch("/api/local-audio", {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: kind
-  });
-}
-document.getElementById("localAudioToneBtn").addEventListener("click", function () {
-  playLocalAudio("tone");
+document.getElementById("volume").addEventListener("change", function (e) {
+  sendCommand("volume " + e.target.value).then(refreshStatus);
 });
-document.getElementById("localAudioVoiceBtn").addEventListener("click", function () {
-  playLocalAudio("voice");
+
+document.getElementById("muteBtn").addEventListener("click", function () {
+  sendCommand("mute").then(refreshStatus);
 });
 
 document.getElementById("saveBtn").addEventListener("click", function () {
@@ -622,6 +634,7 @@ document.getElementById("resetBtn").addEventListener("click", function () {
   }
 });
 
+setPageDisabled(true);
 refreshStatus();
 refreshLinkPins();
 pollTimer = setInterval(refreshStatus, 4000);

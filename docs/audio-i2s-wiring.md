@@ -86,12 +86,17 @@ audio pacman   # RP2040: plays the Pac-Man power-pellet clip (see PacManFace)
 volume [percent]  # show, or set (0-100, 100 = original level), this board's own playback volume
 ```
 
-Send either over the serial console (USB, or the ESP32 bridge's relayed
-command protocol). The ESP32's own speaker has no serial console of its
-own to test from directly - use its web UI's "Audio" section (`Play Tone`/
-`Play Voice` buttons - see `docs/esp32-network-bridge.md`), or its
-`POST /api/local-audio` endpoint (body `tone` or `voice`) - either plays
-immediately on the ESP32's own speaker with no RP2040 involvement at all.
+Send any of these over the serial console (USB, or the ESP32 bridge's
+relayed command protocol) - the bridge's own web UI has an "Audio"
+section wired to the same three buttons plus volume/mute, see
+`docs/esp32-network-bridge.md`.
+
+The ESP32 can also have its own, separate speaker (a second MAX98357A on
+its own GPIOs, entirely independent of the RP2040's). That one has no
+serial console to test from directly and isn't wired to any button on
+the web UI (it controls the RP2040's speaker, above) - use its
+`POST /api/local-audio` endpoint instead (body `tone` or `voice`), which
+plays immediately with no RP2040 involvement at all.
 
 ## Triggering ESP32 playback from the RP2040
 
