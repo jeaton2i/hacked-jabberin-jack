@@ -380,7 +380,20 @@ function enqueue(fn) {
   return result;
 }
 
+// Bumped every time the user actually changes something, so a status
+// fetch can tell whether it's still the freshest thing asked for by the
+// time it comes back - see refreshStatus() below. enqueue() alone only
+// stops requests from overlapping *on the wire*; it doesn't stop an
+// older one that was already queued (e.g. the periodic poll, queued the
+// instant before a click) from being *applied* after a newer action,
+// since FIFO queueing still runs it first. That's what actually caused
+// "press Set & Show, see the old value again, then the new one a moment
+// later" - not a flaw in polling as a concept, just this queue alone
+// wasn't enough to also detect staleness.
+var actionSeq = 0;
+
 function sendCommand(cmd) {
+  actionSeq++;
   return enqueue(function () {
     return fetch("/api/command", {
       method: "POST",
@@ -394,12 +407,23 @@ function sendCommand(cmd) {
 }
 
 function refreshStatus() {
+  var seqAtStart = actionSeq;
   return enqueue(function () {
     return fetch("/api/status").then(function (res) {
       if (!res.ok) { throw new Error("status " + res.status); }
       return res.json();
     }).then(function (status) {
       setBanner("Connected", false);
+      if (actionSeq !== seqAtStart) {
+        // A command was sent after this particular fetch started (it was
+        // still queued behind an earlier one, most likely) - this status
+        // predates that command's own effect. Applying it now would
+        // flash the pre-command state right as the command's effect is
+        // about to land; skip it and let the fresher refresh already
+        // coming (that command's own .then(refreshStatus), or the next
+        // periodic tick) update the page instead.
+        return;
+      }
       applyStatus(status);
     }).catch(function (err) {
       // Two very different failure modes land here: fetch() itself
