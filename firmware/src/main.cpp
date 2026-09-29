@@ -634,6 +634,16 @@ void selectFace(size_t index) {
   faces[currentFace]->begin(display.gfx());
   Serial.print("Displaying face: ");
   Serial.println(faceNames[currentFace]);
+  // Same notification, also pushed unprompted to the ESP32 bridge link
+  // (if attached - harmless write to an idle UART otherwise), so it can
+  // notice a face change caused locally (a button press, auto-rotate)
+  // without waiting on its own next explicit "status" round-trip. '!'
+  // marks this as a push rather than a reply to anything asked - see
+  // the bridge's handlePushLine()/drainJackLink() for why that
+  // distinction matters on a link that's otherwise strictly
+  // request/response (see docs/esp32-network-bridge.md).
+  Serial2.print("!face ");
+  Serial2.println(faceNames[currentFace]);
 }
 
 // Briefly overlays a button-press confirmation (e.g. "Rotate: On" / interval,

@@ -84,10 +84,55 @@ constexpr uint32_t kTimeSyncTimeoutMs = 0;
 
 WebServer server(80);
 
+// Updated from the RP2040's unprompted "!face <name>" push (see its
+// selectFace()) - kept fresh here so this board knows about a face change
+// caused locally on the pumpkin (a button press, auto-rotate) the moment
+// it's next noticed on the wire, rather than only whenever this board
+// happens to ask a "status"/etc. question of its own. Nothing reads this
+// yet (the web UI's own /api/status still gets an equally fresh answer
+// from its own live round-trip either way - see handleApiStatus()), but
+// it's real, verified state: check the Serial log for "push: face ...".
+String cachedCurrentFaceName;
+
+// Routes one line read off the link: a push (prefixed '!', meaning the
+// RP2040 sent it unprompted - see its selectFace()) updates cached state
+// here instead of being treated as a reply to anything. Anything else is
+// exactly what drainJackLink() has always assumed stray bytes were:
+// leftover reply text from an earlier timed-out exchange, safe to drop.
+void handleLinkLine(const String &line) {
+  if (!line.startsWith("!")) {
+    return;
+  }
+  int space = line.indexOf(' ');
+  String event = space < 0 ? line.substring(1) : line.substring(1, space);
+  String value = space < 0 ? "" : line.substring(space + 1);
+  if (event == "face") {
+    cachedCurrentFaceName = value;
+    Serial.print("push: face ");
+    Serial.println(value);
+  }
+}
+
+// Reads whatever's currently sitting on the link without blocking,
+// line-buffering it so a push (see handleLinkLine()) can be told apart
+// from stray leftover bytes even if it doesn't all arrive in one call.
+// Persists its partial line across calls (a static local) since a push
+// straddling two drainJackLink() calls would otherwise get split and
+// misread as two incomplete, unrecognized lines instead of one real one.
 void drainJackLink() {
+  static String partialLine;
   Stream &link = jackLink();
   while (link.available()) {
-    link.read();
+    char c = (char)link.read();
+    if (c == '\r') {
+      continue;
+    }
+    if (c == '\n') {
+      handleLinkLine(partialLine);
+      partialLine = "";
+      continue;
+    }
+    partialLine += c;
   }
 }
 
@@ -126,6 +171,7 @@ String sendCommandAndRead(const String &cmd) {
   link.print('\n');
 
   String reply;
+  String lineBuf;
   unsigned long start = millis();
   unsigned long lastByte = start;
   while (millis() - start < kReplyTimeoutMs) {
@@ -140,15 +186,42 @@ String sendCommandAndRead(const String &cmd) {
       // idle-waiting for more.
       char c = (char)link.read();
       lastByte = millis();
-      if (c != '\r') {
-        reply += c;
+      if (c == '\r') {
+        continue;
       }
+      // Line-buffered (rather than appending every byte straight to
+      // `reply`, as this used to) so an unprompted push (see
+      // handleLinkLine()) landing between requesting something and
+      // reading its reply - unlikely, but the RP2040 has no way to know
+      // this exchange is in progress before writing one - gets routed
+      // there instead of corrupting whatever this reply's own parser
+      // downstream expected (a "status" JSON reply with a stray
+      // "!face ...\n" spliced into it, say).
+      if (c == '\n') {
+        if (lineBuf.startsWith("!")) {
+          handleLinkLine(lineBuf);
+        } else {
+          reply += lineBuf;
+          reply += '\n';
+        }
+        lineBuf = "";
+        continue;
+      }
+      lineBuf += c;
       continue;
     }
     if (reply.length() > 0 && millis() - lastByte > kReplyQuietGapMs) {
       break;
     }
     yield();
+  }
+  // Whatever's left in lineBuf never got a trailing newline before the
+  // loop ended (a quiet gap or the full timeout) - included the same way
+  // the old byte-at-a-time version always would have, as long as it's
+  // not itself a (necessarily incomplete, but still recognizably tagged)
+  // push line.
+  if (lineBuf.length() > 0 && !lineBuf.startsWith("!")) {
+    reply += lineBuf;
   }
   sendCommandInFlight = false;
   return reply;
