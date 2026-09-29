@@ -21,6 +21,18 @@ constexpr uint32_t kSampleRate = 8000;
 constexpr float kTwoPi = 6.283185307179586f;
 constexpr int16_t kToneAmplitude = 12000; // headroom below full-scale int16
 
+// The clips/tone were audibly clipping at volumeScale's true 1.0 ceiling
+// (real recorded audio, e.g. the Pac-Man clip, already sits close to
+// full-scale - multiplying that by 1.0 leaves it there, and the
+// MAX98357A/speaker chain distorts before hitting the digital ceiling).
+// Same pattern as CandleFlicker::brightness(): setVolume()/volume() still
+// store and report whatever was actually requested (so "volume 100"
+// keeps meaning "100%" to anyone asking), but every sample gets this
+// lower real ceiling applied instead of the raw scale, the same way
+// brightness's color() clamps per-channel at the point of use rather
+// than in setBrightness() itself.
+constexpr float kMaxEffectiveVolume = 0.8f;
+
 // Bigger than this library's own default (6 buffers x 64 words, ~48ms at
 // 8kHz) - pump() is only fed once per main loop() iteration, and that
 // loop's own draw() work plus its flat 16ms delay() can add up to well
@@ -35,6 +47,11 @@ I2S i2s(OUTPUT, PIN_I2S_BCLK, PIN_I2S_DATA);
 bool began = false;
 float volumeScale = 1.0f;
 
+float effectiveVolume() {
+  return volumeScale > kMaxEffectiveVolume ? kMaxEffectiveVolume
+                                           : volumeScale;
+}
+
 // startClipAsync()/pump() state - see i2s_player.h.
 const int16_t *asyncSamples = nullptr;
 size_t asyncLength = 0;
@@ -42,10 +59,11 @@ size_t asyncPos = 0;
 
 void playSineTone(float freqHz, unsigned long durationMs) {
   size_t sampleCount = (size_t)(kSampleRate * durationMs / 1000);
+  float volume = effectiveVolume();
   for (size_t i = 0; i < sampleCount; i++) {
     float t = (float)i / (float)kSampleRate;
     int16_t sample =
-        (int16_t)(kToneAmplitude * volumeScale * sinf(kTwoPi * freqHz * t));
+        (int16_t)(kToneAmplitude * volume * sinf(kTwoPi * freqHz * t));
     i2s.write16(sample, sample);
   }
 }
@@ -93,8 +111,9 @@ void I2sPlayer::playClip(const int16_t *samples, size_t length,
     Serial.println("Hz - skipping playback rather than mis-pitching it");
     return;
   }
+  float volume = effectiveVolume();
   for (size_t i = 0; i < length; i++) {
-    int16_t sample = (int16_t)(samples[i] * volumeScale);
+    int16_t sample = (int16_t)(samples[i] * volume);
     i2s.write16(sample, sample);
   }
 }
@@ -125,8 +144,9 @@ void I2sPlayer::pump() {
   // L+R word) - see I2S::availableForWrite(). Only writing while there's
   // room is what makes this non-blocking: write16() itself busy-waits if
   // the buffer's actually full, which asking first avoids hitting.
+  float volume = effectiveVolume();
   while (asyncPos < asyncLength && i2s.availableForWrite() >= 4) {
-    int16_t sample = (int16_t)(asyncSamples[asyncPos] * volumeScale);
+    int16_t sample = (int16_t)(asyncSamples[asyncPos] * volume);
     i2s.write16(sample, sample);
     asyncPos++;
   }
