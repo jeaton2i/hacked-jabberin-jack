@@ -1373,7 +1373,14 @@ void handleSerialCommand(const char *line) {
   if (strncmp(line, "text", 4) == 0 && (line[4] == '\0' || line[4] == ' ')) {
     const char *arg = skipSpaces(line + 4);
     if (arg[0] == '\0') {
-      cmdOut->println("Usage: text <line1>[|line2[|line3[|line4]]]");
+      cmdOut->print("ConfigurableText: ");
+      for (uint8_t i = 0; i < configurableTextFace.lineCount(); i++) {
+        if (i > 0) {
+          cmdOut->print(" / ");
+        }
+        cmdOut->print(configurableTextFace.line(i));
+      }
+      cmdOut->println();
       return;
     }
     // Copied out (rather than split in place) since `line`/`arg` alias the
@@ -1436,6 +1443,16 @@ void handleSerialCommand(const char *line) {
   }
   if (strncmp(line, "rotate", 6) == 0 && (line[6] == '\0' || line[6] == ' ')) {
     const char *arg = skipSpaces(line + 6);
+    if (arg[0] == '\0') {
+      cmdOut->print("Rotate interval: ");
+      if (autoRotateMs == 0) {
+        cmdOut->println("off");
+      } else {
+        cmdOut->print(autoRotateMs);
+        cmdOut->println(" ms");
+      }
+      return;
+    }
     char *end;
     long ms = strtol(arg, &end, 10);
     if (end != arg && *end == '\0' && ms >= 0) {
