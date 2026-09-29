@@ -136,12 +136,24 @@ Based on the work from pburgess:
 
 ## Runtime Controls
 
-Three push buttons (wired active-low to GND) or the serial console both
-drive the same controls: **next face** (GP16), **pause/resume auto-rotate**
-(GP17), and **toggle random/in-order face advance** (GP18). Pressing the
-pause or order button briefly overlays a status message on the display
-confirming what it just switched to. On boot, the serial console prints the
-command list; send `help` any time to see it again.
+Three push buttons (wired active-low to GND), each single-click *and*
+double-click, or the serial console, all drive the same controls:
+
+| Button | Single-click | Double-click |
+|---|---|---|
+| GP16 | Next face | Previous face |
+| GP17 | Pause/resume auto-rotate | Toggle random/in-order face advance |
+| GP18 | Mute/unmute this board's own audio | *(unused)* |
+
+A double-click is only disambiguated from two single-clicks on GP16/GP17
+(the ones with something bound to both) - each waits up to 350ms after a
+first click to see whether a second one follows before committing to the
+single-click action, the same brief delay any double-click needs to be
+told apart from a single one. GP18 has nothing bound to a double-click,
+so it reacts immediately. Pressing anything other than next/previous
+briefly overlays a status message on the display confirming what it just
+switched to. On boot, the serial console prints the command list; send
+`help` any time to see it again.
 
 | Command       | Effect                                                    |
 |---------------|-------------------------------------------------------------|
@@ -155,6 +167,7 @@ command list; send `help` any time to see it again.
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `brightness [percent]` | Show, or set, the candle brightness (`100` = the flicker's original intensity; default is `115`) |
 | `volume [percent]` | Show, or set, this board's own audio playback volume (`100` = original clip/tone level, no boost above that) |
+| `mute`        | Mute this board's own audio, or restore whatever volume was playing before muting (same button as the old "order" toggle - see "Runtime Controls" above) |
 | `eyecolor [blue\|red\|green\|brown]` | Show, or set, the animated eye faces' iris color (default `blue`, the native art) - only the plain eye faces; the candle-lit ones always stay their usual monochrome orange/yellow regardless |
 | `order [random\|in-order]` | Show, or set, whether auto-rotate/next-face advances in list order or picks a random enabled face |
 | `esp32link [tx rx]` | Show, or set (as GP numbers), the pins the optional ESP32 bridge's UART is wired to - setting them saves the whole config and reboots to apply; see `docs/esp32-network-bridge.md` for which pins are actually valid |

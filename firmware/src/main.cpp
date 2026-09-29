@@ -57,8 +57,19 @@ namespace {
 // to GND.
 constexpr int8_t PIN_NEXT_BUTTON = 16;
 constexpr int8_t PIN_PAUSE_BUTTON = 17;
-constexpr int8_t PIN_ORDER_BUTTON = 18;
-constexpr unsigned long kButtonDebounceMs = 200;
+constexpr int8_t PIN_MUTE_BUTTON = 18;
+// Just filters mechanical contact bounce - kept short so it doesn't eat
+// into kDoubleClickWindowMs below (a real double-click's second press can
+// land well under 200ms after the first).
+constexpr unsigned long kButtonDebounceMs = 40;
+// How long a single-click button (see ClickButton) waits after a first
+// press to see whether a second one follows before committing to the
+// single-click action - i.e. the same "is this a double-click" wait every
+// mouse/UI double-click already imposes, not something new to this
+// project. Only buttons with a bound double-click action wait at all
+// (see pollClickButton()) - the mute button isn't one, so it still
+// reacts immediately.
+constexpr unsigned long kDoubleClickWindowMs = 350;
 
 // UART1 link to an optional ESP32 Wi-Fi bridge board (see
 // docs/esp32-network-bridge.md for wiring + the bridge's own firmware).
@@ -364,6 +375,9 @@ unsigned long savedRotateMs = kDefaultAutoRotateMs;
 // false = advance through enabled faces in list order (default); true =
 // advance to a random enabled face each time.
 bool randomOrder = false;
+// Remembers the volume to restore when the mute button/command turns
+// audio back on - same idea as savedRotateMs above.
+float savedVolume = 1.0f;
 
 // Runtime-configurable ESP32 bridge link pins (see the "esp32link"
 // command) - deliberately not compile-time constants, since getting these
@@ -404,9 +418,6 @@ struct DebouncedButton {
   int lastState = HIGH;
   unsigned long lastChangeMs = 0;
 };
-DebouncedButton nextButton{PIN_NEXT_BUTTON};
-DebouncedButton pauseButton{PIN_PAUSE_BUTTON};
-DebouncedButton orderButton{PIN_ORDER_BUTTON};
 
 bool buttonPressed(DebouncedButton &button, unsigned long now) {
   int state = digitalRead(button.pin);
@@ -417,6 +428,45 @@ bool buttonPressed(DebouncedButton &button, unsigned long now) {
   }
   button.lastState = state;
   return pressed;
+}
+
+// A button that distinguishes a single click from a double click: on a
+// first press, waits kDoubleClickWindowMs to see whether a second one
+// follows (see pollClickButton()) before committing to the single-click
+// action, the same way a mouse double-click is disambiguated - so this
+// unavoidably adds up to that much latency to the single-click action,
+// only on buttons that actually have a double-click bound (see
+// PIN_MUTE_BUTTON, which doesn't need any of this and stays a plain
+// DebouncedButton reacting immediately).
+struct ClickButton {
+  DebouncedButton debounced;
+  bool awaitingSecondClick = false;
+  unsigned long firstClickMs = 0;
+};
+ClickButton nextButton{DebouncedButton{PIN_NEXT_BUTTON}};
+ClickButton pauseButton{DebouncedButton{PIN_PAUSE_BUTTON}};
+DebouncedButton muteButton{PIN_MUTE_BUTTON};
+
+enum class ClickResult { None, Single, Double };
+
+ClickResult pollClickButton(ClickButton &button, unsigned long now) {
+  bool pressed = buttonPressed(button.debounced, now);
+  if (button.awaitingSecondClick) {
+    if (pressed) {
+      button.awaitingSecondClick = false;
+      return ClickResult::Double;
+    }
+    if (now - button.firstClickMs > kDoubleClickWindowMs) {
+      button.awaitingSecondClick = false;
+      return ClickResult::Single; // window expired - it was just one click
+    }
+    return ClickResult::None; // still within the window, still waiting
+  }
+  if (pressed) {
+    button.awaitingSecondClick = true;
+    button.firstClickMs = now;
+  }
+  return ClickResult::None;
 }
 
 // Long enough for "text " plus all TextFace::kMaxLines lines at their full
@@ -639,6 +689,23 @@ void advanceFace() {
   lastAutoRotateMs = millis();
 }
 
+// Steps back one *enabled* face in list order, wrapping around - always
+// list order, even when randomOrder is set: "previous" isn't really a
+// meaningful concept for a random pick (there's no history to undo), so
+// this just always undoes "next" the plain way rather than picking
+// another random face under a name that implies going backward.
+void previousFace() {
+  size_t prev = currentFace;
+  for (size_t i = 0; i < kFaceCount; i++) {
+    prev = (prev + kFaceCount - 1) % kFaceCount;
+    if (faceEnabled[prev]) {
+      break;
+    }
+  }
+  selectFace(prev);
+  lastAutoRotateMs = millis();
+}
+
 // Pauses auto-rotate if it's running, or resumes it at whatever interval
 // was running before it was paused (see savedRotateMs).
 void toggleRotation() {
@@ -664,6 +731,27 @@ void toggleOrderMode() {
   Serial.print("Face order: ");
   Serial.println(randomOrder ? "random" : "in-order");
   showStatusMessage("Face Order:", randomOrder ? "Random" : "In-Order");
+}
+
+// Mutes if currently audible, or restores whatever volume was playing
+// before muting - same save/restore shape as toggleRotation()'s
+// savedRotateMs. Deliberately doesn't need its own persisted "muted"
+// flag: muted *is* I2sPlayer::volume() == 0, the same way "paused" is
+// just autoRotateMs == 0, so "save" naturally persists whichever state
+// is live without any special-casing.
+void toggleMute() {
+  if (I2sPlayer::volume() > 0.0f) {
+    savedVolume = I2sPlayer::volume();
+    I2sPlayer::setVolume(0.0f);
+    Serial.println("Audio: muted");
+    showStatusMessage("Audio:", "Muted");
+  } else {
+    I2sPlayer::setVolume(savedVolume);
+    Serial.print("Audio: unmuted at ");
+    Serial.print((int)(I2sPlayer::volume() * 100.0f + 0.5f));
+    Serial.println("%");
+    showStatusMessage("Audio:", "Unmuted");
+  }
 }
 
 // RGB565 -> the 8-bit-per-channel color NeoPixel wants. CandleFlicker's
@@ -815,6 +903,7 @@ void printHelp() {
   cmdOut->println("  rotate <ms> - set auto-rotate interval (0 disables)");
   cmdOut->println("  brightness [percent] - show/set candle brightness (100=original)");
   cmdOut->println("  volume [percent] - show/set audio playback volume for this board's own I2S output (0-100, 100=original)");
+  cmdOut->println("  mute - mute this board's own audio, or restore whatever volume was playing before muting");
   cmdOut->println("  order [random|in-order] - show/set face advance order");
   cmdOut->println("  esp32link [tx rx] - show, or set + save + reboot to apply, the ESP32 bridge UART's GPIO pins");
   cmdOut->println("  countdown [<month> <day> <name>] - show, or set, the Countdown face's target date/holiday name (name may contain one '|' to split it across 2 lines)");
@@ -830,7 +919,7 @@ void printHelp() {
   cmdOut->println("  reset       - restore compiled-in defaults (not saved)");
   cmdOut->println("  debug       - toggle EyeLook motion logging (off by default)");
   cmdOut->println("  help        - show this message");
-  cmdOut->println("Buttons: next (GP16), pause/play rotate (GP17), toggle random/in-order (GP18)");
+  cmdOut->println("Buttons: GP16 next/(dbl)previous, GP17 pause-play-rotate/(dbl)toggle-order, GP18 mute");
 }
 
 void printFontList(size_t currentFontIndex) {
@@ -997,6 +1086,10 @@ void handleSerialCommand(const char *line) {
     } else {
       cmdOut->println("Usage: volume <percent>");
     }
+    return;
+  }
+  if (strcmp(line, "mute") == 0) {
+    toggleMute();
     return;
   }
   if (strncmp(line, "order", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
@@ -1396,7 +1489,7 @@ void setup() {
 
   pinMode(PIN_NEXT_BUTTON, INPUT_PULLUP);
   pinMode(PIN_PAUSE_BUTTON, INPUT_PULLUP);
-  pinMode(PIN_ORDER_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_MUTE_BUTTON, INPUT_PULLUP);
 
   leds.begin();
   leds.show(); // all off until the first updateLeds() in loop()
@@ -1413,14 +1506,28 @@ void loop() {
   pollSerial();
 
   unsigned long now = millis();
-  if (buttonPressed(nextButton, now)) {
+  switch (pollClickButton(nextButton, now)) {
+  case ClickResult::Single:
     advanceFace();
+    break;
+  case ClickResult::Double:
+    previousFace();
+    break;
+  case ClickResult::None:
+    break;
   }
-  if (buttonPressed(pauseButton, now)) {
+  switch (pollClickButton(pauseButton, now)) {
+  case ClickResult::Single:
     toggleRotation();
-  }
-  if (buttonPressed(orderButton, now)) {
+    break;
+  case ClickResult::Double:
     toggleOrderMode();
+    break;
+  case ClickResult::None:
+    break;
+  }
+  if (buttonPressed(muteButton, now)) {
+    toggleMute();
   }
 
   // A status message expires back to whatever face preceded it - unless the
