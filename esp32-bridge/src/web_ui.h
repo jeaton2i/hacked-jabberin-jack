@@ -527,9 +527,15 @@ document.getElementById("rotateApplyBtn").addEventListener("click", function () 
 
 document.getElementById("rotateEnabled").addEventListener("change", function (e) {
   updateRotateControlsEnabled();
-  if (!e.target.checked) {
-    sendCommand("rotate 0").then(refreshStatus);
-  }
+  // Symmetric with unchecking: applies immediately either way, rather
+  // than only turning rotation off immediately and leaving turning it
+  // back on to require a separate Apply click - which did nothing
+  // visible and then got silently undone by the next poll reading back
+  // the still-zero rotateMs it never actually changed.
+  var ms = e.target.checked
+      ? (parseInt(document.getElementById("rotateMs").value, 10) || lastNonZeroRotateMs)
+      : 0;
+  sendCommand("rotate " + ms).then(refreshStatus);
 });
 
 document.getElementById("orderSelect").addEventListener("change", function (e) {
