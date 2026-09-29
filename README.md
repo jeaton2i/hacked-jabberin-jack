@@ -15,7 +15,7 @@ Based on the work from pburgess:
 - [Jabberin' Jack XL (white)](https://www.amazon.com/dp/B0H2K7R6RT) note: I haven't gotten this version working yet)
 - [Generic Raspberry Pi Pico clone](https://www.amazon.com/dp/B0CG9FWDDC)
 - [Adaptor for projector ribbon cable](https://www.amazon.com/dp/B09VPHWM26)
-- Optional [MAX98357 for audio](https://www.amazon.com/dp/B0B4GK5R1R) (in progress)
+- Optional [MAX98357 for audio](https://www.amazon.com/dp/B0B4GK5R1R) (working - see `docs/audio-i2s-wiring.md`)
 - Optional generic esp32 to make it networked (works, but needs its own power supply, the pumpkin's usb port doesn't provide enough for the projector light and the esp32 with wifi)
 
 ## References
@@ -59,15 +59,24 @@ Based on the work from pburgess:
 - Audio support
   - Speaking voice (pre-rendered clips) — basic playback started, see
     `docs/audio-i2s-wiring.md`: a MAX98357A I2S amp on each board, with a
-    test tone and one embedded test speech clip so far. The RP2040 plays
-    them on its own speaker (`audio tone`/`audio voice`); the optional
-    ESP32 bridge can play them on its own separate speaker too, either
-    from its web UI or triggered remotely by the RP2040
-    (`audio esp-tone`/`audio esp-voice`, polled over the existing bridge
-    link). Still just test tone + one test word - actual pre-rendered
-    speech content is the remaining piece.
+    test tone, one embedded test speech clip, and a Pac-Man power-pellet
+    clip so far. The RP2040 plays them on its own speaker (`audio
+    tone`/`audio voice`/`audio pacman`, with a runtime `volume` control);
+    the optional ESP32 bridge can play the tone/voice pair on its own
+    separate speaker too, either from its web UI or triggered remotely by
+    the RP2040 (`audio esp-tone`/`audio esp-voice`, polled over the
+    existing bridge link). Still just test tone + one test word + one
+    game-audio clip - actual pre-rendered speech content is the remaining
+    piece.
   - Speaking voice (text to speech)
-  - Lip sync to external audio / microphone
+  - Lip sync to external audio / microphone — not started against real
+    speech yet, but `PacManFace` now proves out the underlying technique:
+    it syncs its power-pellet visual to the exact moment in its own audio
+    clip via a non-blocking playback path (`I2sPlayer::startClipAsync()`/
+    `pump()`) that keeps animating while the clip plays, deriving its
+    animation progress from actual playback position rather than a
+    separate timer. `TriangleFaceAnimated`'s jaw flap is the natural next
+    thing to wire up this way once there's real speech content to sync to.
 - Sensor support
   - Basic motion sensor to trigger effects
   - Camera-based sensor for human detection (look at person, trigger speech)
@@ -100,8 +109,8 @@ Based on the work from pburgess:
   hardware assumptions.
 - `docs/esp32-network-bridge.md` — ESP32 bridge wiring, Wi-Fi setup, and
   its web UI/API.
-- `docs/audio-i2s-wiring.md` — I2S audio (MAX98357A) wiring and the
-  `audio <tone|voice>` command.
+- `docs/audio-i2s-wiring.md` — I2S audio (MAX98357A) wiring, the
+  `audio`/`volume` commands, and `I2sPlayer`'s non-blocking playback path.
 - `tools/convert_image_to_rgb565.py` — converts an image in `sample-images/`
   into a PROGMEM RGB565 header under `firmware/src/assets/` for use by
   `StaticImageFace`/`CandleLitImageFace`.
@@ -145,14 +154,18 @@ command list; send `help` any time to see it again.
 | `font [name]` | List available fonts, or switch `ConfigurableText` to one (see below) |
 | `rotate <ms>` | Set the auto-rotate interval in milliseconds (`0` disables) |
 | `brightness [percent]` | Show, or set, the candle brightness (`100` = the flicker's original intensity; default is `115`) |
+| `volume [percent]` | Show, or set, this board's own audio playback volume (`100` = original clip/tone level, no boost above that) |
+| `eyecolor [blue\|red\|green\|brown]` | Show, or set, the animated eye faces' iris color (default `blue`, the native art) - only the plain eye faces; the candle-lit ones always stay their usual monochrome orange/yellow regardless |
 | `order [random\|in-order]` | Show, or set, whether auto-rotate/next-face advances in list order or picks a random enabled face |
 | `esp32link [tx rx]` | Show, or set (as GP numbers), the pins the optional ESP32 bridge's UART is wired to - setting them saves the whole config and reboots to apply; see `docs/esp32-network-bridge.md` for which pins are actually valid |
-| `audio <tone\|voice>` | Play the synthesized test tone, or the test speech clip, over this board's own optional I2S audio output - see `docs/audio-i2s-wiring.md` |
-| `audio <esp-tone\|esp-voice>` | Queue the same to instead play on the optional ESP32 bridge's own speaker (it polls for this - see `audiotrigger`) |
+| `audio <tone\|voice\|pacman>` | Play the synthesized test tone, the test speech clip, or the Pac-Man power-pellet clip, over this board's own optional I2S audio output - see `docs/audio-i2s-wiring.md` |
+| `audio <esp-tone\|esp-voice>` | Queue the same tone/voice clips to instead play on the optional ESP32 bridge's own speaker (it polls for this - see `audiotrigger`) |
 | `audiotrigger` | Read + clear the pending ESP32 audio queue - polled by the ESP32 bridge, not really meant for humans |
 | `countdown [<month> <day> <name>]` | Show, or set, the `Countdown` face's target date/holiday name (defaults to Halloween, `10 31`) - `name` may contain one `\|` to split it across 2 lines, e.g. `countdown 6 14 Connie's\|Birthday` |
 | `settime <year> <month> <day>` | Feed today's actual date to the `Countdown` face - the RP2040 has no clock of its own, so this is meant to be sent periodically by the ESP32 bridge once it has real time over NTP (see `docs/esp32-network-bridge.md`); nothing stops sending it by hand too |
-| `save`        | Persist the current face selection + rotate interval + brightness + order + ESP32 link pins + countdown holiday to flash |
+| `setclock <hour> <minute> <second>` | Feed the current wall-clock time to the `Clock` face, the same way `settime` feeds the `Countdown` face its date |
+| `clockformat [12\|24]` | Show, or set, whether the `Clock` face displays 12- or 24-hour time (default `24`) |
+| `save`        | Persist the current face selection + rotate interval + brightness + volume + order + ESP32 link pins + countdown holiday to flash |
 | `load`        | Reload the saved config from flash                          |
 | `reset`       | Restore the compiled-in defaults (does not touch flash)     |
 | `debug`       | Toggle diagnostic logging for the animated-eye faces' motion (off by default) |
@@ -197,28 +210,38 @@ reordering or adding/removing faces in `main.cpp`.
 
 - The PlatformIO firmware structure, Arduino_GFX dependency, display wrapper,
   and face interface are in place, targeting the ILI9225 220x176 panel.
-- Around 29 faces are registered and cycle via button, serial, or
-  auto-rotation: geometric faces (`TriangleFace` with a warm candle flicker,
-  plus a `TriangleFaceAnimated` variant whose mouth flaps open/closed in a
-  procedural "talking" pattern, `TestPatternFace` — currently noisy so
-  disabled by default, `Checkerboard`, `Bullseye`, `PacMan`, `Tropical` — a
-  palm tree fanning/swaying in the wind over traveling wave lines), text
-  faces (`TextFace`, including a `ConfigurableText` instance whose message
-  is set live over serial - see "Runtime Controls" - and `Countdown`, which
-  shows "`<N>` days until `<holiday>`" once the ESP32 bridge has synced a
-  real date), an animated eyeball whose iris darts around inside the
-  sclera (`EyeballLookAround`), and a set of static image faces (Jack
-  Skellington, skull, commodore logo, WPI goat, robot, eyeball) - all
-  available plain or candle-lit via a shared flicker helper.
+- 32 faces are registered (31 visible in the normal rotation, plus the
+  hidden `StatusMessage` button-feedback overlay) and cycle via button,
+  serial, or auto-rotation, grouped by theme: geometric faces (`Triangle`
+  with a warm candle flicker, plus a `TriangleAnimated` variant whose
+  mouth flaps open/closed in a procedural "talking" pattern), test
+  patterns (color bars — currently noisy so disabled by default,
+  checkerboard, bullseye), themed character faces (Jack Skellington,
+  Skull, Robot with a look-around variant, an animated eyeball whose iris
+  darts around inside the sclera and can be recolored live with
+  `eyecolor`), text faces (`TextFace`, including a `ConfigurableText`
+  instance whose message is set live over serial, a `Countdown` face
+  showing "`<N>` days until `<holiday>`" once synced, and a `Clock` face
+  rendered as seven-segment "LED" digits, both needing the ESP32 bridge
+  for real date/time), and an "other" catch-all (Pac-Man - its
+  power-pellet visual now synced to its own audio clip, an ESP32 logo, a
+  Tropical scene, plus WPI logo variants) - all available plain or
+  candle-lit via a shared flicker helper where it makes sense. A QR-code
+  face was also built (encoding a link to this repo) but is compiled out
+  behind a flag: this pumpkin's display is projected onto a curved
+  surface, and a QR's fine data modules defocus into an unscannable blur
+  there - kept in place in case a bigger/flatter pumpkin makes it worth
+  retrying.
 - Runtime config (which faces are enabled, the rotate interval, brightness,
-  face order, and the countdown holiday) can be changed and persisted to
-  flash over the serial console, physical buttons, or the optional ESP32
-  web UI — see "Runtime Controls" above and `docs/esp32-network-bridge.md`.
+  volume, face order, eye color, and the countdown holiday) can be changed
+  and persisted to flash over the serial console, physical buttons, or the
+  optional ESP32 web UI — see "Runtime Controls" above and
+  `docs/esp32-network-bridge.md`.
 - `TriangleFace` shows a visible wall of pumpkin flesh around every carved
   opening with a hot glowing interior, rather than filling it flat, for a
   3D-carved look (see "Initial Goals" above).
-- Overlays, moving eyes, full audio content, and sensors remain future
-  work.
+- Overlays, a moving nose, full pre-rendered speech content, and sensors
+  remain future work.
 
 ## Firmware Previews
 

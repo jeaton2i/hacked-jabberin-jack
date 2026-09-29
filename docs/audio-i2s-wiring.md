@@ -1,10 +1,11 @@
 # I2S Audio Wiring
 
-Gives the pumpkin a voice - a synthesized test tone and one embedded test
-speech clip so far, playable from either board:
+Gives the pumpkin a voice - a synthesized test tone, one embedded test
+speech clip, and (RP2040 only) a Pac-Man power-pellet clip so far,
+playable from either board, with a runtime `volume` control:
 
 - The RP2040 can drive its own I2S speaker directly, and works standalone
-  even with no ESP32 bridge present (`audio <tone|voice>`).
+  even with no ESP32 bridge present (`audio <tone|voice|pacman>`).
 - The optional ESP32 bridge board (see `docs/esp32-network-bridge.md`) can
   drive a second, independent I2S speaker of its own, playable from its
   web UI or triggered remotely by the RP2040 (`audio <esp-tone|esp-voice>`).
@@ -81,6 +82,8 @@ Directly on either board:
 ```
 audio tone     # RP2040: synthesized two-note chime on its own speaker
 audio voice    # RP2040: plays its test speech clip
+audio pacman   # RP2040: plays the Pac-Man power-pellet clip (see PacManFace)
+volume [percent]  # show, or set (0-100, 100 = original level), this board's own playback volume
 ```
 
 Send either over the serial console (USB, or the ESP32 bridge's relayed
@@ -135,16 +138,42 @@ is fine for a sound-effect trigger.
   anything recorded at a different rate rather than mis-pitching it, so
   convert new clips with the default rate (or pass `--rate 8000`
   explicitly).
+- The Pac-Man power-pellet clip (RP2040 only, `sample-audio/
+  pacman_power_pellet_6s.wav` -> `firmware/src/assets/audio_pacman.h`)
+  was trimmed from real Pac-Man arcade gameplay audio, timed so the
+  waka-waka -> siren transition lands at its exact midpoint - see
+  `PacManFace` below for why that matters, and note `--no-trim` was used
+  (unlike the voice clip) since its fades/timing were already tuned by
+  hand and silence-trimming could have disturbed them.
 
-## Why playback is blocking
+## Why manual test playback is blocking, but PacManFace isn't
 
 `I2sPlayer::playTestTone()`/`playClip()` block until finished on both
 boards - no face animation, button, web request, or serial polling
 happens during that time (on whichever board is actually playing). Fine
-for short clips like these; a longer or overlapping-audio use case (e.g.
-a sequence of clips with animation reacting in between) would need a
-non-blocking rewrite driven by each side's own DMA completion callback
-instead.
+for a manually-triggered test clip; not fine for a face that needs to
+keep animating while a clip plays.
+
+`PacManFace` uses a second, non-blocking path instead:
+`I2sPlayer::startClipAsync()` queues a clip without blocking, and
+`pump()` - called once every `loop()` iteration on the RP2040 regardless
+of which face is active - feeds it only as much of the I2S output's DMA
+buffer as currently has room, so it never blocks either. The face then
+drives its own animation progress from `I2sPlayer::elapsedMsAsync()`
+(how much of the clip has actually been fed so far) rather than an
+independently-running timer, so the visual can't drift out of sync with
+the audio even if a slow frame ever makes `pump()` fall behind - and
+falls back to a plain wall-clock timer via `I2sPlayer::ready()` if no
+I2S hardware ever came up at all, so the face still animates (just
+unsynced) with no speaker wired. `selectFace()` calls `stopAsync()`
+whenever the display switches to a different face, so nothing queued
+this way keeps playing over an unrelated one.
+
+This is still not a true DMA-callback-driven background mixer (only one
+clip can be queued this way at a time, and `pump()` needs to be called
+regularly rather than truly running in the background) - just enough to
+not-block, which is what a per-face animation sync actually needs. A
+real overlapping-audio use case would still want that fuller rewrite.
 
 ## Why I2S is never reconfigured after boot
 
