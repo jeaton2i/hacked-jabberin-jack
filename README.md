@@ -168,7 +168,7 @@ switched to. On boot, the serial console prints the command list; send
 | `brightness [percent]` | Show, or set, the candle brightness (`100` = the flicker's original intensity; default is `115`) |
 | `volume [percent]` | Show, or set, this board's own audio playback volume (`100` = original clip/tone level, no boost above that) |
 | `mute`        | Mute this board's own audio, or restore whatever volume was playing before muting (same button as the old "order" toggle - see "Runtime Controls" above) |
-| `eyecolor [blue\|red\|green\|brown]` | Show, or set, the animated eye faces' iris color (default `blue`, the native art) - only the plain eye faces; the candle-lit ones always stay their usual monochrome orange/yellow regardless |
+| `eyecolor [blue\|red\|green\|brown\|random]` | Show, or set, the animated eye faces' iris color (default `blue`, the native art) - only the plain eye faces; the candle-lit ones always stay their usual monochrome orange/yellow regardless. `random` picks one of the 4 right now, it's not an ongoing randomizer like `order random` is |
 | `order [random\|in-order]` | Show, or set, whether auto-rotate/next-face advances in list order or picks a random enabled face |
 | `esp32link [tx rx]` | Show, or set (as GP numbers), the pins the optional ESP32 bridge's UART is wired to - setting them saves the whole config and reboots to apply; see `docs/esp32-network-bridge.md` for which pins are actually valid |
 | `audio <tone\|voice\|pacman>` | Play the synthesized test tone, the test speech clip, or the Pac-Man power-pellet clip, over this board's own optional I2S audio output - see `docs/audio-i2s-wiring.md` |
@@ -185,7 +185,10 @@ switched to. On boot, the serial console prints the command list; send
 
 Faces also auto-rotate on their own every `rotate` milliseconds (6s by
 default) among whichever faces are currently enabled, in list order or
-randomly per `order`.
+randomly per `order`. `Countdown`/`Clock` are skipped by rotation and
+next/previous alike while unsynced (they'd otherwise just show their
+"needs the ESP32 bridge" placeholder) - `goto <n>` still jumps straight
+to either on purpose, same as it already ignores enabled/disabled.
 
 An optional second board (an ESP32, see `esp32-bridge/` and
 `docs/esp32-network-bridge.md`) can link to the RP2040 - over a second UART,

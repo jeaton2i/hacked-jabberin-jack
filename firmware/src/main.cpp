@@ -651,6 +651,26 @@ void showStatusMessage(const char *line1, const char *line2 = nullptr) {
   statusMessageUntilMs = millis() + kStatusMessageMs;
 }
 
+// True for an enabled face that auto-rotate/next/previous should actually
+// stop on. Countdown and Clock are otherwise-normal enabled faces that
+// show a "needs the ESP32 bridge" placeholder until synced - useless to
+// land on in rotation until then, so they're skipped (like a disabled
+// face) while unsynced. "goto <n>" deliberately bypasses this (same as
+// it already bypasses faceEnabled) - jumping there on purpose to check
+// on things is still fine.
+bool faceIsSelectable(size_t i) {
+  if (!faceEnabled[i]) {
+    return false;
+  }
+  if (i == kCountdownFaceIndex && !countdownFace.synced()) {
+    return false;
+  }
+  if (i == kClockFaceIndex && !clockFace.synced()) {
+    return false;
+  }
+  return true;
+}
+
 // Advances to another *enabled* face - the next one in list order, wrapping
 // around, or (when randomOrder is set) a random enabled face other than the
 // current one. Also used by auto-rotate, which is why it resets the
@@ -661,14 +681,14 @@ void advanceFace() {
   if (randomOrder) {
     size_t choices = 0;
     for (size_t i = 0; i < kFaceCount; i++) {
-      if (faceEnabled[i] && i != currentFace) {
+      if (faceIsSelectable(i) && i != currentFace) {
         choices++;
       }
     }
     if (choices > 0) {
       size_t pick = random(choices);
       for (size_t i = 0; i < kFaceCount; i++) {
-        if (faceEnabled[i] && i != currentFace) {
+        if (faceIsSelectable(i) && i != currentFace) {
           if (pick == 0) {
             next = i;
             break;
@@ -680,7 +700,7 @@ void advanceFace() {
   } else {
     for (size_t i = 0; i < kFaceCount; i++) {
       next = (next + 1) % kFaceCount;
-      if (faceEnabled[next]) {
+      if (faceIsSelectable(next)) {
         break;
       }
     }
@@ -698,7 +718,7 @@ void previousFace() {
   size_t prev = currentFace;
   for (size_t i = 0; i < kFaceCount; i++) {
     prev = (prev + kFaceCount - 1) % kFaceCount;
-    if (faceEnabled[prev]) {
+    if (faceIsSelectable(prev)) {
       break;
     }
   }
@@ -910,7 +930,7 @@ void printHelp() {
   cmdOut->println("  settime <year> <month> <day> - feed today's actual date to the Countdown face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  setclock <hour 0-23> <minute> <second> - feed the current wall-clock time to the Clock face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  clockformat [12|24] - show, or set, whether the Clock face displays 12- or 24-hour time (default 24)");
-  cmdOut->println("  eyecolor [blue|red|green|brown] - show, or set, the animated eye faces' iris color (default blue; only affects the plain, not candle-lit, eye faces)");
+  cmdOut->println("  eyecolor [blue|red|green|brown|random] - show, or set, the animated eye faces' iris color (default blue; \"random\" picks one of the 4 right now, it's not an ongoing randomizer; only affects the plain, not candle-lit, eye faces)");
   cmdOut->println("  audio <tone|voice|pacman> - play the synthesized test tone, the test speech clip, or the Pac-Man power pellet clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
   cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
@@ -1281,13 +1301,20 @@ void handleSerialCommand(const char *line) {
       color = kEyeColorGreen;
     } else if (strcmp(arg, "brown") == 0) {
       color = kEyeColorBrown;
+    } else if (strcmp(arg, "random") == 0) {
+      // Picks one of the 4 real colors right now and sets it, same as
+      // typing that color's name by hand - not an ongoing randomizer
+      // that keeps re-picking on its own (unlike "order random", which
+      // is a standing mode). Re-run "eyecolor random" any time to
+      // reroll.
+      color = (EyeColor)random(kEyeColorBrown + 1);
     } else {
-      cmdOut->println("Usage: eyecolor [blue|red|green|brown]");
+      cmdOut->println("Usage: eyecolor [blue|red|green|brown|random]");
       return;
     }
     EyeLookMotion::setColor(color);
     cmdOut->print("Eye color set to: ");
-    cmdOut->println(arg);
+    cmdOut->println(eyeColorName(color));
     return;
   }
   if (strncmp(line, "audio", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
