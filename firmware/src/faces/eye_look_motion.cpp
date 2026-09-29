@@ -193,9 +193,13 @@ uint16_t recolorIris(uint16_t src, EyeColor color) {
 
 bool EyeLookMotion::s_debugLogging = false;
 EyeColor EyeLookMotion::s_color = kEyeColorBlue;
+bool EyeLookMotion::s_randomEachDisplay = false;
 
 void EyeLookMotion::reset() {
   randomSeed(micros());
+  if (s_randomEachDisplay) {
+    s_color = (EyeColor)random(kEyeColorBrown + 1);
+  }
   _offsetX = 0.0f;
   _offsetY = 0.0f;
   _targetX = 0.0f;

@@ -56,6 +56,16 @@ public:
   static void setColor(EyeColor color) { s_color = color; }
   static EyeColor color() { return s_color; }
 
+  // When on, reset() (i.e. every time an eye face's begin() runs - see
+  // EyeLookFace/CandleLitEyeLookFace) rerolls the color to a fresh random
+  // pick instead of leaving whatever was last set - "surprise me every
+  // time this face comes up", as opposed to setColor() picking one fixed
+  // color that then stays put. See main.cpp's "eyecolor random" command.
+  static void setRandomEachDisplay(bool enabled) {
+    s_randomEachDisplay = enabled;
+  }
+  static bool randomEachDisplay() { return s_randomEachDisplay; }
+
 private:
   void pickNewTarget();
 
@@ -84,4 +94,5 @@ private:
 
   static bool s_debugLogging;
   static EyeColor s_color;
+  static bool s_randomEachDisplay;
 };

@@ -930,7 +930,7 @@ void printHelp() {
   cmdOut->println("  settime <year> <month> <day> - feed today's actual date to the Countdown face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  setclock <hour 0-23> <minute> <second> - feed the current wall-clock time to the Clock face (meant for the ESP32 bridge's NTP sync)");
   cmdOut->println("  clockformat [12|24] - show, or set, whether the Clock face displays 12- or 24-hour time (default 24)");
-  cmdOut->println("  eyecolor [blue|red|green|brown|random] - show, or set, the animated eye faces' iris color (default blue; \"random\" picks one of the 4 right now, it's not an ongoing randomizer; only affects the plain, not candle-lit, eye faces)");
+  cmdOut->println("  eyecolor [blue|red|green|brown|random] - show, or set, the animated eye faces' iris color (default blue; \"random\" rerolls it every time the eyeball face is shown, until a specific color is chosen again; only affects the plain, not candle-lit, eye faces)");
   cmdOut->println("  audio <tone|voice|pacman> - play the synthesized test tone, the test speech clip, or the Pac-Man power pellet clip, over this board's own I2S output");
   cmdOut->println("  audio <esp-tone|esp-voice> - queue the same for the ESP32 bridge's speaker instead (see \"audiotrigger\")");
   cmdOut->println("  audiotrigger - read + clear the pending ESP32 audio queue (polled by the bridge, not meant for humans)");
@@ -1289,24 +1289,32 @@ void handleSerialCommand(const char *line) {
     const char *arg = skipSpaces(line + 8);
     if (arg[0] == '\0') {
       cmdOut->print("Eye color: ");
-      cmdOut->println(eyeColorName(EyeLookMotion::color()));
+      cmdOut->print(eyeColorName(EyeLookMotion::color()));
+      cmdOut->println(EyeLookMotion::randomEachDisplay()
+                          ? " (rerolled each time the eyeball face shows)"
+                          : "");
       return;
     }
     EyeColor color;
     if (strcmp(arg, "blue") == 0) {
       color = kEyeColorBlue;
+      EyeLookMotion::setRandomEachDisplay(false);
     } else if (strcmp(arg, "red") == 0) {
       color = kEyeColorRed;
+      EyeLookMotion::setRandomEachDisplay(false);
     } else if (strcmp(arg, "green") == 0) {
       color = kEyeColorGreen;
+      EyeLookMotion::setRandomEachDisplay(false);
     } else if (strcmp(arg, "brown") == 0) {
       color = kEyeColorBrown;
+      EyeLookMotion::setRandomEachDisplay(false);
     } else if (strcmp(arg, "random") == 0) {
-      // Picks one of the 4 real colors right now and sets it, same as
-      // typing that color's name by hand - not an ongoing randomizer
-      // that keeps re-picking on its own (unlike "order random", which
-      // is a standing mode). Re-run "eyecolor random" any time to
-      // reroll.
+      // A standing mode, not a one-time pick: the eyeball face rerolls
+      // to a fresh random color every time it's shown (see
+      // EyeLookMotion::reset()) until a specific color is chosen again.
+      // Also picks one right now, so there's an immediate result instead
+      // of only affecting the *next* time the face comes up.
+      EyeLookMotion::setRandomEachDisplay(true);
       color = (EyeColor)random(kEyeColorBrown + 1);
     } else {
       cmdOut->println("Usage: eyecolor [blue|red|green|brown|random]");
@@ -1314,7 +1322,10 @@ void handleSerialCommand(const char *line) {
     }
     EyeLookMotion::setColor(color);
     cmdOut->print("Eye color set to: ");
-    cmdOut->println(eyeColorName(color));
+    cmdOut->print(eyeColorName(color));
+    cmdOut->println(strcmp(arg, "random") == 0
+                        ? " (will reroll each time the eyeball face shows)"
+                        : "");
     return;
   }
   if (strncmp(line, "audio", 5) == 0 && (line[5] == '\0' || line[5] == ' ')) {
