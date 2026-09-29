@@ -343,34 +343,60 @@ function setPageDisabled(disabled) {
   });
 }
 
+// Serializes every request to this bridge through one queue - the ESP32
+// side can only actually have one exchange with the RP2040 in flight at
+// a time anyway (see its own sendCommandInFlight guard); an overlapping
+// one just comes back empty/504 instead of running concurrently. Without
+// this, the periodic poll (see pollTimer below) could fire in the middle
+// of a user-initiated sendCommand().then(refreshStatus) - the loser of
+// that race either errors out (briefly disabling the whole page, having
+// done nothing wrong) or, worse, its response can land and get applied
+// *after* the other one's, showing stale state right after the fresh one
+// ("it refreshes, then refreshes again [to something older]").
+var actionChain = Promise.resolve();
+function enqueue(fn) {
+  var result = actionChain.then(fn, fn);
+  // What future enqueue() calls actually chain onto - deliberately
+  // swallows this entry's own outcome so one failed request doesn't wedge
+  // every later one behind a permanently-rejected chain. The caller of
+  // *this* enqueue() still sees the real result/rejection via `result`.
+  actionChain = result.then(function () {}, function () {});
+  return result;
+}
+
 function sendCommand(cmd) {
-  return fetch("/api/command", {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: cmd
-  }).then(function (res) {
-    if (!res.ok) { throw new Error("Command failed: " + cmd); }
-    return res.json();
+  return enqueue(function () {
+    return fetch("/api/command", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: cmd
+    }).then(function (res) {
+      if (!res.ok) { throw new Error("Command failed: " + cmd); }
+      return res.json();
+    });
   });
 }
 
 function refreshStatus() {
-  return fetch("/api/status").then(function (res) {
-    if (!res.ok) { throw new Error("status " + res.status); }
-    return res.json();
-  }).then(function (status) {
-    setBanner("Connected", false);
-    applyStatus(status);
-  }).catch(function (err) {
-    // Two very different failure modes land here: fetch() itself
-    // rejecting (this bridge is genuinely unreachable) vs. a bad/partial
-    // response or a bug in applyStatus() (it answered, but something after
-    // that broke) - logged so either is actually diagnosable from the
-    // browser console instead of just "can't reach", which isn't always
-    // true and was itself once the symptom of a real bug elsewhere.
-    console.error("refreshStatus failed:", err);
-    setBanner("Problem talking to the pumpkin controller (see console)", true);
-    setPageDisabled(true);
+  return enqueue(function () {
+    return fetch("/api/status").then(function (res) {
+      if (!res.ok) { throw new Error("status " + res.status); }
+      return res.json();
+    }).then(function (status) {
+      setBanner("Connected", false);
+      applyStatus(status);
+    }).catch(function (err) {
+      // Two very different failure modes land here: fetch() itself
+      // rejecting (this bridge is genuinely unreachable) vs. a bad/partial
+      // response or a bug in applyStatus() (it answered, but something
+      // after that broke) - logged so either is actually diagnosable from
+      // the browser console instead of just "can't reach", which isn't
+      // always true and was itself once the symptom of a real bug
+      // elsewhere.
+      console.error("refreshStatus failed:", err);
+      setBanner("Problem talking to the pumpkin controller (see console)", true);
+      setPageDisabled(true);
+    });
   });
 }
 
